@@ -1,0 +1,100 @@
+name: Build OS Project
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          nasm \
+          gcc \
+          gcc-multilib \
+          make \
+          qemu-system-x86
+        echo "=== Tool Versions ==="
+        nasm -v
+        gcc --version | head -n1
+        make --version | head -n1
+    
+    - name: Build project
+      run: |
+        echo "=== Building OS ==="
+        make all
+        
+        echo "=== Checking build artifacts ==="
+        ls -la build/
+        if [ -f build/system.img ]; then
+          echo "✓ system.img created successfully"
+          ls -lh build/system.img
+        else
+          echo "✗ system.img not found!"
+          exit 1
+        fi
+        
+        echo "=== Checking bootloader ==="
+        if [ -f build/bootloader.bin ]; then
+          echo "✓ bootloader.bin created"
+          ls -lh build/bootloader.bin
+        fi
+        
+        echo "=== Checking kernel ==="
+        if [ -f build/kernel.bin ]; then
+          echo "✓ kernel.bin created"
+          ls -lh build/kernel.bin
+        fi
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: os-artifacts
+        path: |
+          build/
+          !build/**/*.o
+          !build/**/*.elf
+        retention-days: 7
+        if-no-files-found: error
+    
+    - name: Clean build
+      run: |
+        echo "=== Testing clean target ==="
+        make clean
+        if [ ! -d build ]; then
+          echo "✓ Clean successful - build directory removed"
+        else
+          echo "Build directory still exists"
+          ls -la build/
+        fi
+
+  test:
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: os-artifacts
+    
+    - name: Verify downloaded artifacts
+      run: |
+        echo "=== Verifying artifacts ==="
+        ls -la
+        if [ -f build/system.img ]; then
+          echo "✓ system.img found"
+          file build/system.img
+        else
+          echo "✗ system.img missing!"
+          exit 1
+        fi
