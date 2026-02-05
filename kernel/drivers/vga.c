@@ -8,11 +8,12 @@ static bool cursor_enabled;
 static size_t cursor_x;
 static size_t cursor_y;
 static uint8_t color;
+static uint16_t shadow_buffer[VGA_WIDTH*VGA_HEIGHT];
 
 void vga_init() {
     cursor_x = 0;
     cursor_y = 0;
-    color = vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_GREY);
+    color = vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_WHITE);
     vga_clear();
     vga_cursor_enable(14, 15);
 }
@@ -24,10 +25,19 @@ void vga_clear() {
     vga_cursor_update();
 }
 
+void vga_wait_vblank(void) {
+    while (inb(0x3DA) & 0x08);
+    while (!(inb(0x3DA) & 0x08));
+}
+
+void vga_update(void) {
+    vga_wait_vblank();
+    memcpy((void *)0xB8000, shadow_buffer, VGA_WIDTH*VGA_HEIGHT*2);
+}
+
 void vga_fill(char c) {
-    volatile uint16_t *vga = (volatile uint16_t *) VGA_MEMORY_ADDRESS;
     uint16_t entry = (uint16_t)((color << 8) | (c & 0xFF));
-    for (size_t i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++) vga[i] = entry;
+    for (size_t i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++) shadow_buffer[i] = entry;
 }
 
 void vga_print(const char *str) {
@@ -35,7 +45,6 @@ void vga_print(const char *str) {
 }
 
 void vga_put_char(char c) {
-    volatile uint16_t *vga = (volatile uint16_t *) VGA_MEMORY_ADDRESS;
     switch (c) {
         case '\n':
             vga_newline();
@@ -55,7 +64,7 @@ void vga_put_char(char c) {
             break;
             
         default:
-            vga[cursor_y * VGA_WIDTH + cursor_x] = (uint16_t)((color << 8) | c);
+            shadow_buffer[cursor_y * VGA_WIDTH + cursor_x] = (uint16_t)((color << 8) | c);
             cursor_x++;
             
             if (cursor_x >= VGA_WIDTH) vga_newline();
@@ -66,15 +75,14 @@ void vga_put_char(char c) {
 }
 
 void vga_scroll(void) {
-    volatile uint16_t *vga = (volatile uint16_t *) VGA_MEMORY_ADDRESS;
     for (size_t y = 1; y < VGA_HEIGHT; y++) {
         for (size_t x = 0; x < VGA_WIDTH; x++) {
-            vga[(y - 1) * VGA_WIDTH + x] = vga[y * VGA_WIDTH + x];
+            shadow_buffer[(y - 1) * VGA_WIDTH + x] = shadow_buffer[y * VGA_WIDTH + x];
         }
     }
     
     uint16_t blank = (uint16_t)((color << 8) | ' ');
-    for (size_t x = 0; x < VGA_WIDTH; x++) vga[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = blank;
+    for (size_t x = 0; x < VGA_WIDTH; x++) shadow_buffer[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = blank;
     
     cursor_y = VGA_HEIGHT - 1;
 }
@@ -92,7 +100,6 @@ void vga_tab(void) {
 }
 
 void vga_backspace(void) {
-    volatile uint16_t *vga = (volatile uint16_t *) VGA_MEMORY_ADDRESS;
     if (cursor_x > 0) {
         cursor_x--;
     } else if (cursor_y > 0) {
@@ -100,7 +107,7 @@ void vga_backspace(void) {
         cursor_x = VGA_WIDTH - 1;
     }
     
-    vga[cursor_y * VGA_WIDTH + cursor_x] = (uint16_t)((color << 8) | ' ');
+    shadow_buffer[cursor_y * VGA_WIDTH + cursor_x] = (uint16_t)((color << 8) | ' ');
 }
 
 void vga_cursor_set(size_t x, size_t y) {

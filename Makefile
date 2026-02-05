@@ -28,12 +28,12 @@ $(BUILD_DIR):
 
 run: $(SYSTEM_IMG)
 	@echo "QEMU  $@"
-	@qemu-system-i386 -drive format=raw,file=$(SYSTEM_IMG) -serial stdio
+	@qemu-system-i386 -drive format=raw,file=$(SYSTEM_IMG) -serial stdio -m 512M
 
 debug: $(SYSTEM_IMG)
 	@echo "QEMU  $@"
 	@echo "Attach to system: target remote localhost:1234"
-	@qemu-system-i386 -drive format=raw,file=$(SYSTEM_IMG) -S -s
+	@qemu-system-i386 -drive format=raw,file=$(SYSTEM_IMG) -S -s -m 4G
 
 clean:
 	@echo "CLEAN"

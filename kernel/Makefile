@@ -10,6 +10,7 @@ INCLUDE_DIR = include
 
 ASMFLAGS = -f elf32
 CFLAGS = -std=gnu99 -m32 -ffreestanding -fno-stack-protector -O0 -Wall -Wextra \
+	-mno-sse -mno-sse2 -mno-mmx -mno-80387 \
 	-I$(INCLUDE_DIR) -I. -Iarch/$(ARCH)/include
 LDFLAGS = -m elf_i386 -T linker.ld -no-warn-rwx-segments -nostdlib
 OBJCPFLAGS = -O binary

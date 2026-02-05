@@ -1,5 +1,7 @@
 #pragma once
 
+#define NULL ((void *)0)
+
 typedef unsigned char u_char;
 typedef unsigned short int u_short;
 typedef unsigned int u_int;
