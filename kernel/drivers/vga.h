@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <drivers/tty.h>
 
 #define VGA_WIDTH 80
 #define VGA_HEIGHT 25
