@@ -21,6 +21,14 @@ void kmain(void) {
 
     heap_debug();
 
+    char buffer[32];
+
+    // memfs *fs = memfs_create();
+    // itoa((uintptr_t)fs, buffer, 16);
+    // vga_print("MemFS Address: 0x");
+    // vga_print(buffer);
+    // vga_put_char('\n');
+
     shell_run();
     
     while (1) hlt();

@@ -232,7 +232,6 @@ void snake_run(struct shell_args args) {
         draw_info();
         
         vga_cursor_update();
-        vga_update();
 
         sleep_cycles(current_delay());
     }
@@ -242,7 +241,6 @@ void snake_run(struct shell_args args) {
 
     vga_cursor_set(MAP_W/2 - 5, MAP_H/2);
     vga_print("GAME OVER!");
-    vga_update();
     
     vga_cursor_set(0, VGA_HEIGHT-1);
 }

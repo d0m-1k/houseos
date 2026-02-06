@@ -8,7 +8,7 @@ static bool cursor_enabled;
 static size_t cursor_x;
 static size_t cursor_y;
 static uint8_t color;
-static uint16_t buffer[VGA_WIDTH*VGA_HEIGHT];
+static uint16_t *buffer = (uint16_t *) 0xB8000;
 
 void vga_init() {
     cursor_x = 0;
