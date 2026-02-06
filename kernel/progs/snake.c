@@ -35,6 +35,10 @@ static bool running;
 static int score = 0;
 static unsigned long base_delay = 10000000;
 
+static void cmd_init(void) {
+    register_command("snake", snake_run);
+}
+
 static void sleep_cycles(unsigned long cycles) {
     for (volatile unsigned long i = 0; i < cycles; i++);
 }
@@ -207,21 +211,22 @@ static void snake_init(void) {
     srand(123456);
 }
 
-static void parse_args(struct shell_args args) {
-    if (args.argc >= 2) {
-        base_delay = (unsigned long)atoi(args.argv[1]);
+static void parse_args(struct shell_args *a) {
+    if (a->argc >= 2) {
+        base_delay = (unsigned long)atoi(a->argv[1]);
     }
 
-    if (args.argc >= 4) {
-        int bg = atoi(args.argv[2]);
-        int fg = atoi(args.argv[3]);
+    if (a->argc >= 4) {
+        int bg = atoi(a->argv[2]);
+        int fg = atoi(a->argv[3]);
         vga_color_make(fg, bg);
     }
 }
 
-void snake_run(struct shell_args args) {
-    parse_args(args);
+uint32_t snake_run(struct shell_args *a) {
+    parse_args(a);
     snake_init();
+    cmd_init();
 
     while (running) {
         handle_input();
@@ -241,6 +246,7 @@ void snake_run(struct shell_args args) {
 
     vga_cursor_set(MAP_W/2 - 5, MAP_H/2);
     vga_print("GAME OVER!");
+    return 0;
     
     vga_cursor_set(0, VGA_HEIGHT-1);
 }

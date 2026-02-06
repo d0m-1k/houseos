@@ -8,6 +8,8 @@
 #include <asm/processor.h>
 #include <drivers/memfs.h>
 
+static memfs *fs = NULL;
+
 void kmain(void) {
     vga_init();
     vga_color_set(vga_color_make(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLUE));
@@ -21,15 +23,12 @@ void kmain(void) {
 
     heap_debug();
 
-    char buffer[32];
+    fs = memfs_create(1024*1024);
+    if (fs == NULL) {
+        vga_print("Failed to create MemFS\n");
+    }
 
-    // memfs *fs = memfs_create();
-    // itoa((uintptr_t)fs, buffer, 16);
-    // vga_print("MemFS Address: 0x");
-    // vga_print(buffer);
-    // vga_put_char('\n');
-
-    shell_run();
+    shell_run(fs);
     
     while (1) hlt();
 }

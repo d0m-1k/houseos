@@ -2,4 +2,4 @@
 
 #include <progs/shell.h>
 
-void snake_run(struct shell_args args);
+uint32_t snake_run(struct shell_args *a);

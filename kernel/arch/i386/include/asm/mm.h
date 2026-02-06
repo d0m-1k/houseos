@@ -30,8 +30,8 @@ typedef struct block_header {
     struct block_header* prev;
 } block_header_t;
 
-void mm_init();
-void kmalloc_init();
+void mm_init(void);
+void kmalloc_init(void);
 
 void* kmalloc(size_t size);
 void* kcalloc(size_t num, size_t size);
@@ -42,8 +42,8 @@ void* valloc(size_t size);
 void* valloc_aligned(size_t size, size_t alignment);
 void vfree(void* ptr);
 
-size_t get_total_heap();
-size_t get_used_heap();
-size_t get_free_heap();
+size_t get_total_heap(void);
+size_t get_used_heap(void);
+size_t get_free_heap(void);
 
-void heap_debug();
+void heap_debug(void);
