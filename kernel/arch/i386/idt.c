@@ -3,9 +3,10 @@
 #include <drivers/keyboard.h>
 // #include <drivers/timers.h>
 #include <asm/port.h>
+#include <asm/processor.h>
 
 struct idt_entry idt[IDT_ENTRIES];
-struct idt_ptr idtp;
+struct struct_ptr idtp;
 
 uint32_t handler_address = 0;
 
@@ -126,5 +127,5 @@ void idt_init() {
     #undef isr
     
     idt_load((uint32_t)&idtp);
-    __asm__ __volatile__("sti");
+    sti();
 }

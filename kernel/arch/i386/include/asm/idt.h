@@ -20,11 +20,6 @@ struct interrupt_frame {
     uint32_t ss;
 } __attribute__((packed));
 
-struct idt_ptr {
-	uint16_t limit;
-	uint32_t base;
-} __attribute__((packed));
-
 void idt_init();
 void idt_set_gate(uint8_t, uint32_t, uint16_t, uint8_t);
 void idt_load(uint32_t);
@@ -33,4 +28,4 @@ void idt_set_handler(uint32_t);
 void pic_init();
 
 extern struct idt_entry idt[IDT_ENTRIES];
-extern struct idt_ptr idtp;
+extern struct struct_ptr idtp;

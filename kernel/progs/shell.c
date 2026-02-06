@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <asm/port.h>
 
 #define INPUT_BUFFER_SIZE 128
 
@@ -100,6 +101,7 @@ static void shell_execute(char *cmd) {
         vga_put_char('\n');
     } else if (strcmp(a.argv[0], "reboot") == 0) {
         vga_print("[stub] rebooting...\n");
+        outb(0x64, 0xFE);
     } else if (strcmp(a.argv[0], "color") == 0) {
         if (a.argc == 1) {
             uint8_t c = vga_color_get();

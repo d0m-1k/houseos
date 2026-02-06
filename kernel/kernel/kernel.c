@@ -5,6 +5,7 @@
 #include <string.h>
 #include <progs/shell.h>
 #include <progs/snake.h>
+#include <asm/processor.h>
 
 void kmain(void) {
     vga_init();
@@ -14,7 +15,7 @@ void kmain(void) {
 
     idt_init();
     keyboard_init();
-    asm volatile("sti");
+    sti();
     mm_init();
     kmalloc_init();
 
@@ -25,5 +26,5 @@ void kmain(void) {
     // struct shell_args args = {2, {"snake", "500000000"}};
     // snake_run(args);
     
-    while (1) __asm__ __volatile__("hlt");
+    while (1) hlt();
 }
