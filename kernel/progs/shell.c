@@ -54,7 +54,6 @@ static void redraw_input_line(void) {
     vga_print(input_buf);
     vga_put_char(' ');
     vga_cursor_set(input_start_x + cursor_pos, input_start_y);
-    vga_update();
 }
 
 
@@ -135,7 +134,6 @@ static void shell_execute(char *cmd) {
         vga_print(a.argv[0]);
         vga_print("\n");
     }
-    vga_update();
 }
 
 void shell_run(void) {
@@ -145,8 +143,6 @@ void shell_run(void) {
     vga_print("House OS Shell (type 'help')\n");
 
     shell_prompt();
-
-    vga_update();
 
     while (1) {
         if (!keyboard_event_available()) continue;
@@ -160,7 +156,6 @@ void shell_run(void) {
                 input_buf[input_len] = '\0';
                 shell_execute(input_buf);
                 shell_prompt();
-                vga_update();
                 break;
 
             case KEY_BACKSPACE:
