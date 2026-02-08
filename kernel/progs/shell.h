@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <drivers/memfs.h>
+#include <drivers/filesystem/memfs.h>
 
 #define MAX_ARGS 16
 #define MAX_COMMANDS 64

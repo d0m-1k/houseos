@@ -7,7 +7,7 @@
 #include <string.h>
 #include <asm/port.h>
 #include <asm/mm.h>
-#include <drivers/memfs.h>
+#include <drivers/filesystem/memfs.h>
 
 static memfs *fs = NULL;
 
@@ -670,6 +670,52 @@ static uint32_t cmd_fsinfo(struct shell_args *a) {
     return 0;
 }
 
+static uint32_t cmd_hexdump(struct shell_args *a) {
+    if (a->argc != 3) {
+        vga_print("Usage: hexdump <address> <size>\n");
+        vga_print("Note: arguments are decimal numbers\n");
+        return 1;
+    }
+    
+    uint32_t address = atoi(a->argv[1]);
+    uint32_t size = atoi(a->argv[2]);
+    
+    if (size == 0) {
+        vga_print("hexdump: size must be greater than 0\n");
+        return 1;
+    }
+    
+    const unsigned char *p = (const unsigned char *)address;
+    const char *hex = "0123456789ABCDEF";
+    
+    for (uint32_t offset = 0; offset < size; offset += 16) {
+        for (int i = 7; i >= 0; i--) vga_put_char(hex[((address + offset) >> (i * 4)) & 0xF]);
+        vga_print(": ");
+        
+        for (int i = 0; i < 16; i++) {
+            if (offset + i < size) {
+                vga_put_char(hex[(p[offset + i] >> 4) & 0xF]);
+                vga_put_char(hex[p[offset + i] & 0xF]);
+            } else vga_print("  ");
+            
+            vga_put_char(' ');
+            if (i == 7) vga_put_char(' ');
+        }
+        
+        vga_print("| ");
+        
+        for (int i = 0; i < 16; i++) {
+            if (offset + i < size) {
+                unsigned char c = p[offset + i];
+                vga_put_char((c >= 32 && c <= 126) ? c : '.');
+            } else vga_put_char(' ');
+        }
+        
+        vga_print(" |\n");
+    }
+    
+    return 0;
+}
 static void cmd_init(void) {
     register_command("command_not_found", cmd_command_not_found);
     register_command("help", cmd_help);
@@ -694,4 +740,6 @@ static void cmd_init(void) {
     register_command("rm", cmd_rm);
     register_command("rmdir", cmd_rmdir);
     register_command("stat", cmd_stat);
+
+    register_command("hexdump", cmd_hexdump);
 }
