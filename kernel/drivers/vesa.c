@@ -52,9 +52,9 @@ void vesa_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
             *(uint16_t*)pixel = (uint16_t)color;
             break;
         case 3:
-            pixel[0] = (color >> 16) & 0xFF;  // Blue
-            pixel[1] = (color >> 8) & 0xFF;   // Green
-            pixel[2] = color & 0xFF;          // Red
+            pixel[0] = (color >> 16) & 0xFF;
+            pixel[1] = (color >> 8) & 0xFF;
+            pixel[2] = color & 0xFF;
             break;
         case 4:
             *(uint32_t*)pixel = color;
@@ -86,12 +86,7 @@ void vesa_clear(uint32_t color) {
         uint32_t* fb = (uint32_t*)framebuffer;
         uint32_t count = screen_size / 4;
         
-        for (uint32_t i = 0; i < count; i += 4) {
-            fb[i] = color;
-            fb[i + 1] = color;
-            fb[i + 2] = color;
-            fb[i + 3] = color;
-        }
+        for (uint32_t i = 0; i < count; i++) fb[i] = color;
     } else {
         for (uint32_t y = 0; y < mode_info->height; y++) {
             for (uint32_t x = 0; x < mode_info->width; x++) {

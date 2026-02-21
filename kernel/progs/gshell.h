@@ -1,7 +1,9 @@
 #pragma once
 
-#include <stdint.h>
-#include <progs/shell.h>
 #include <drivers/filesystem/memfs.h>
 
-void gshell_run(memfs *fs);
+struct gshell_args {
+    memfs *fs;
+};
+
+void gshell_run(void *arg);

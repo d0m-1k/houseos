@@ -7,6 +7,6 @@ struct struct_ptr {
 	uintptr_t base;
 } __attribute__((packed));
 
-void hlt(void);
-void sti(void);
-void cli(void);
+#define hlt() __asm__ __volatile__("hlt")
+#define sti() __asm__ __volatile__("sti")
+#define cli() __asm__ __volatile__("cli")

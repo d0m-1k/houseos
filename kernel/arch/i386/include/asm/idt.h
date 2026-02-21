@@ -21,10 +21,10 @@ struct interrupt_frame {
 } __attribute__((packed));
 
 void idt_init();
-void idt_set_gate(uint8_t, uint32_t, uint16_t, uint8_t);
-void idt_load(uint32_t);
-void idt_handler(uint8_t, uint32_t);
-void idt_set_handler(uint32_t);
+void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags);
+void idt_load(uint32_t idt_ptr);
+void idt_handler(uint8_t num, uint32_t err_code);
+void idt_set_handler(uint32_t addr);
 void pic_init();
 
 extern struct idt_entry idt[IDT_ENTRIES];

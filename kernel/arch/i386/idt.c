@@ -1,9 +1,10 @@
 #include <asm/idt.h>
 #include <drivers/vga.h>
 #include <drivers/keyboard.h>
-// #include <drivers/timers.h>
+#include <drivers/mouse.h>
 #include <asm/port.h>
 #include <asm/processor.h>
+#include <asm/task.h>
 
 struct idt_entry idt[IDT_ENTRIES];
 struct struct_ptr idtp;
@@ -23,38 +24,16 @@ void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags) {
 }
 
 void idt_load(uint32_t idt_ptr) {
-    __asm__ __volatile__ (
-        "lidtl (%0)"
-        :
-        : "r" (idt_ptr)
-    );
+    __asm__ __volatile__("lidtl (%0)" : : "r"(idt_ptr));
 }
 
 #define isr(n) void __attribute__((interrupt)) i##n(struct interrupt_frame* frame) { (void)(frame); idt_handler(n, 0); }
-#define isr_err(n) void __attribute__((interrupt)) i##n(struct interrupt_frame* frame, uint32_t err_code) { (void)(frame); idt_handler(n, err_code); }
+#define isr_err(n) void __attribute__((interrupt)) i##n(struct interrupt_frame* frame, uint32_t err) { (void)(frame); idt_handler(n, err); }
 
-isr(0)      // x / 0
-isr(1)      // 
-isr(2)      // 
-isr(3)      // 
-isr(4)      // 
-isr(5)      // 
-isr(6)      // Invalid opcode
-isr(7)      // 
-isr_err(8)  // 
-isr(9)      // 
-isr_err(10) // 
-isr_err(11) // 
-isr_err(12) // 
-isr_err(13) // 
-isr_err(14) // 
-isr(15)     // 
-isr(16)     // 
-isr_err(17) // 
-isr(18)     // 
-isr(19)     // 
-isr(32)     // Timer
-isr(33)     // Keyboard
+isr(0) isr(1) isr(2) isr(3) isr(4) isr(5) isr(6) isr(7)
+isr_err(8) isr(9) isr_err(10) isr_err(11) isr_err(12) isr_err(13) isr_err(14)
+isr(15) isr(16) isr_err(17) isr(18) isr(19)
+isr(32) isr(33) isr(44)
 
 #undef isr
 #undef isr_err
@@ -63,31 +42,37 @@ void __attribute__((interrupt)) default_handler(struct interrupt_frame* frame) {
     (void)(frame);
     vga_color_set(vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_RED));
     vga_print("Unhandled interrupt\n");
-    while(1);
+    while (1);
 }
 
 void pic_init() {
     outb(0x20, 0x11);
     outb(0xA0, 0x11);
-    
     outb(0x21, 0x20);
     outb(0xA1, 0x28);
-    
     outb(0x21, 0x04);
     outb(0xA1, 0x02);
-    
     outb(0x21, 0x01);
     outb(0xA1, 0x01);
-    
-    outb(0x21, 0b11111101);  // Only IRQ0 && IRQ1
-    outb(0xA1, 0xFF);
+
+    outb(0x21, 0b11111000);
+    outb(0xA1, 0b11101111);
+}
+
+void pit_init() {
+    uint32_t divisor = 1193180 / 100;
+    outb(0x43, 0x36);
+    outb(0x40, divisor & 0xFF);
+    outb(0x40, (divisor >> 8) & 0xFF);
 }
 
 void idt_handler(uint8_t num, uint32_t err_code) {
     if (num == 32) {
-        // timer_handler();
+        
     } else if (num == 33) {
         keyboard_handler();
+    } else if (num == 44) {
+        mouse_handler();
     } else if (handler_address != 0) {
         void (*handler)(uint8_t, uint32_t) = (void (*)(uint8_t, uint32_t)) handler_address;
         handler(num, err_code);
@@ -95,13 +80,13 @@ void idt_handler(uint8_t num, uint32_t err_code) {
         if (num < 32) {
             vga_color_set(vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_RED));
             vga_print("Fatal exception\n");
-            while(1) __asm__ __volatile__("hlt");
+            while (1) __asm__ __volatile__("hlt");
         } else {
             vga_color_set(vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_RED));
             vga_print("Unhandled interrupt\n");
         }
     }
-    
+
     if (num >= 32 && num < 40) {
         outb(0x20, 0x20);
     } else if (num >= 40 && num < 48) {
@@ -112,6 +97,7 @@ void idt_handler(uint8_t num, uint32_t err_code) {
 
 void idt_init() {
     pic_init();
+    pit_init();
 
     idtp.limit = sizeof(struct idt_entry) * IDT_ENTRIES - 1;
     idtp.base = (uint32_t)&idt;
@@ -120,12 +106,12 @@ void idt_init() {
         idt_set_gate(i, (uint32_t)default_handler, 0x08, 0x8E);
     }
 
-    #define isr(n) idt_set_gate(n, (uint32_t)i##n, 0x08, 0x8E);
-    isr(0) isr(1) isr(2) isr(3) isr(4) isr(5) isr(6) isr(7) isr(8) isr(9)
-    isr(10) isr(11) isr(12) isr(13) isr(14) isr(15) isr(16) isr(17) isr(18) isr(19)
-    isr(32) isr(33)
-    #undef isr
-    
+    #define set(n) idt_set_gate(n, (uint32_t)i##n, 0x08, 0x8E);
+    set(0) set(1) set(2) set(3) set(4) set(5) set(6) set(7)
+    set(8) set(9) set(10) set(11) set(12) set(13) set(14)
+    set(15) set(16) set(17) set(18) set(19)
+    set(32) set(33) set(44)
+    #undef set
+
     idt_load((uint32_t)&idtp);
-    sti();
 }

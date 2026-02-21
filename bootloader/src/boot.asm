@@ -31,6 +31,13 @@ _start:
     mov word [dap_sectors], 128
     call read_lba
     jc .disk_kernel_error
+
+    mov dword [dap_start_lba], 198
+    mov word [dap_offset], 0x0000
+    mov word [dap_segment], 0x2000
+    mov word [dap_sectors], 128
+    call read_lba
+    jc .disk_kernel_error
     
     call get_memory_map
     call vesa_load

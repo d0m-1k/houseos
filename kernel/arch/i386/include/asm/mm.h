@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 #define MM_MAP_ADDRESS 0x5000
 #define MM_MAX_ENTRIES 64
@@ -30,6 +31,8 @@ typedef struct block_header {
     struct block_header* prev;
 } block_header_t;
 
+extern struct mm_map global_mmap;
+
 void mm_init(void);
 void kmalloc_init(void);
 
@@ -45,5 +48,3 @@ void vfree(void* ptr);
 size_t get_total_heap(void);
 size_t get_used_heap(void);
 size_t get_free_heap(void);
-
-void heap_debug(void);

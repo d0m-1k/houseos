@@ -34,7 +34,7 @@ $(BUILD_DIR):
 
 run: $(SYSTEM_IMG)
 	@echo "QEMU  $@"
-	@qemu-system-i386 -drive format=raw,file=$(SYSTEM_IMG) -serial stdio -m 512M
+	@qemu-system-i386 -drive format=raw,file=$(SYSTEM_IMG) -serial stdio -m 4G
 
 debug: $(SYSTEM_IMG)
 	@echo "QEMU  $@"

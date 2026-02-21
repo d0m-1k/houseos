@@ -1,4 +1,3 @@
-// fonts/font_renderer.h
 #pragma once
 
 #include <drivers/fonts/psf.h>
