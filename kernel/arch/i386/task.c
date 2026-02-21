@@ -27,14 +27,13 @@ static inline uint32_t get_esp(void) {
 }
 
 void task_init(void (*main_task)(void)) {
-    // Создаём idle-задачу
     uint8_t *idle_stack = (uint8_t*)kmalloc(STACK_SIZE);
     uint32_t *idle_top = (uint32_t*)(idle_stack + STACK_SIZE);
-    *--idle_top = 0;                         // аргумент
-    *--idle_top = (uint32_t)task_exit;       // адрес возврата (не используется)
-    *--idle_top = (uint32_t)idle_task;       // точка входа
-    *--idle_top = 0x202;                      // EFLAGS с IF=1
-    for (int i = 0; i < 7; i++) *--idle_top = 0; // edi,esi,ebp,ebx,edx,ecx,eax
+    *--idle_top = 0;
+    *--idle_top = (uint32_t)task_exit;
+    *--idle_top = (uint32_t)idle_task;
+    *--idle_top = 0x202;
+    for (int i = 0; i < 7; i++) *--idle_top = 0;
 
     task_t *idle = &tasks[task_count++];
     idle->pid = next_pid++;
