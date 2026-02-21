@@ -1,5 +1,4 @@
 #pragma once
-
 #include <stdint.h>
 
 #define STACK_SIZE 4096
@@ -18,6 +17,7 @@ typedef struct task {
     task_state_t state;
     uint8_t *stack;
     struct task *next;
+    uint32_t wake_tick;
 } task_t;
 
 void task_init(void (*main_task)(void));
@@ -27,3 +27,6 @@ void task_exit(void);
 void schedule(void);
 
 extern task_t *current_task;
+extern task_t *_idle_task;
+extern task_t tasks[MAX_TASKS];
+extern int task_count;

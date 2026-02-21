@@ -2,6 +2,8 @@
 #include <drivers/vesa.h>
 #include <drivers/fonts/font_renderer.h>
 #include <asm/task.h>
+#include <asm/timer.h>
+#include <string.h>
 
 void test_task(void *arg) {
     int x = vesa_get_width(), y = vesa_get_height();
@@ -11,10 +13,11 @@ void test_task(void *arg) {
         if (x <= 0) {
             x = vesa_get_width();
             y--;
-            task_yield();
+            sleep(10);
         }
-        for (volatile int i = 0; i < 1000; i++) if (i % 500 == 0) task_yield();
+        if (y <= 0) break;
     }
+    task_exit();
 }
 
 void gshell_run(void *arg) {
@@ -30,15 +33,16 @@ void gshell_run(void *arg) {
 
     int x = 0, y = 0;
     while (1) {
-        vesa_put_pixel(x, y, 0xFF00FF00);
+        vesa_put_pixel(x, y, 0x00FFFF00);
         x++;
         if (x >= vesa_get_width()) {
             x = 0;
             y++;
-            task_yield();
+            sleep(50);
         }
-        for (volatile int i = 0; i < 1000; i++) if (i % 500 == 0) task_yield();
+        if (y >= vesa_get_height()) break;
     }
-
+    
+    task_exit();
     psf_free_font(font);
 }

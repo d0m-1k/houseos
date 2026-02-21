@@ -5,6 +5,7 @@
 #include <asm/port.h>
 #include <asm/processor.h>
 #include <asm/task.h>
+#include <asm/timer.h>
 
 struct idt_entry idt[IDT_ENTRIES];
 struct struct_ptr idtp;
@@ -59,16 +60,11 @@ void pic_init() {
     outb(0xA1, 0b11101111);
 }
 
-void pit_init() {
-    uint32_t divisor = 1193180 / 100;
-    outb(0x43, 0x36);
-    outb(0x40, divisor & 0xFF);
-    outb(0x40, (divisor >> 8) & 0xFF);
-}
-
 void idt_handler(uint8_t num, uint32_t err_code) {
     if (num == 32) {
-        
+        outb(0x20, 0x20);
+        timer_handler();
+        return;
     } else if (num == 33) {
         keyboard_handler();
     } else if (num == 44) {
@@ -97,7 +93,6 @@ void idt_handler(uint8_t num, uint32_t err_code) {
 
 void idt_init() {
     pic_init();
-    pit_init();
 
     idtp.limit = sizeof(struct idt_entry) * IDT_ENTRIES - 1;
     idtp.base = (uint32_t)&idt;

@@ -4,6 +4,7 @@
 #include <asm/idt.h>
 #include <asm/task.h>
 #include <asm/mm.h>
+#include <asm/timer.h>
 #include <string.h>
 #include <progs/gshell.h>
 #include <asm/processor.h>
@@ -21,6 +22,8 @@ void kmain(void) {
     mouse_init();
     mm_init();
     kmalloc_init();
+    timer_init();
+    sti();
 
     fs = memfs_create(10 * 1024 * 1024);
     initramfs_init(fs);
@@ -30,6 +33,5 @@ void kmain(void) {
     struct gshell_args args = {fs};
     task_create(gshell_run, &args);
 
-    sti();
-    while (1) task_yield();
+    while (1) hlt();
 }

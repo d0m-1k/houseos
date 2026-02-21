@@ -3,10 +3,18 @@
 #include <asm/processor.h>
 #include <stddef.h>
 
-static uint32_t next_pid = 1;
-static task_t tasks[MAX_TASKS];
-static int task_count = 0;
+static void idle_task(void *arg) {
+    (void)arg;
+    while (1) {
+        __asm__ __volatile__("hlt");
+    }
+}
+
+uint32_t next_pid = 1;
+task_t tasks[MAX_TASKS];
+int task_count = 0;
 task_t *current_task = NULL;
+task_t *_idle_task = NULL;
 static task_t *ready_head = NULL;
 static task_t *ready_tail = NULL;
 
@@ -19,15 +27,39 @@ static inline uint32_t get_esp(void) {
 }
 
 void task_init(void (*main_task)(void)) {
+    // Создаём idle-задачу
+    uint8_t *idle_stack = (uint8_t*)kmalloc(STACK_SIZE);
+    uint32_t *idle_top = (uint32_t*)(idle_stack + STACK_SIZE);
+    *--idle_top = 0;                         // аргумент
+    *--idle_top = (uint32_t)task_exit;       // адрес возврата (не используется)
+    *--idle_top = (uint32_t)idle_task;       // точка входа
+    *--idle_top = 0x202;                      // EFLAGS с IF=1
+    for (int i = 0; i < 7; i++) *--idle_top = 0; // edi,esi,ebp,ebx,edx,ecx,eax
+
+    task_t *idle = &tasks[task_count++];
+    idle->pid = next_pid++;
+    idle->state = TASK_READY;
+    idle->stack = idle_stack;
+    idle->esp = (uint32_t)idle_top;
+    idle->wake_tick = 0;
+    idle->next = idle;
+
+    _idle_task = idle;
+
     task_t *init_task = &tasks[task_count++];
     init_task->pid = next_pid++;
     init_task->state = TASK_RUNNING;
     init_task->stack = NULL;
     init_task->esp = get_esp();
-    init_task->next = init_task;
+    init_task->wake_tick = 0;
+
+    init_task->next = idle;
+    idle->next = init_task;
+
     current_task = init_task;
-    ready_head = init_task;
+    ready_head = idle;
     ready_tail = init_task;
+
     (void)main_task;
 }
 
@@ -42,19 +74,15 @@ int task_create(void (*entry)(void*), void *arg) {
     *(--top) = (uint32_t)arg;
     *(--top) = (uint32_t)task_exit;
     *(--top) = (uint32_t)entry;
-    *(--top) = 0;
-    *(--top) = 0;
-    *(--top) = 0;
-    *(--top) = 0;
-    *(--top) = 0;
-    *(--top) = 0;
-    *(--top) = 0;
+    *(--top) = 0x202;
+    for (int i = 0; i < 7; i++) *(--top) = 0;
 
     task_t *task = &tasks[task_count++];
     task->pid = next_pid++;
     task->state = TASK_READY;
     task->stack = stack;
     task->esp = (uint32_t)top;
+    task->wake_tick = 0;
 
     if (ready_head == NULL) {
         ready_head = task;
@@ -84,15 +112,38 @@ void task_exit(void) {
 
 void schedule(void) {
     task_t *next = current_task;
+    task_t *first_idle = NULL;
+    int found = 0;
+    
+    do {
+        next = next->next;
+        if (next->state == TASK_READY) {
+            if (next == _idle_task) {
+                if (!first_idle) first_idle = next;
+                continue;
+            }
+            found = 1;
+            break;
+        }
+    } while (next != current_task);
 
-    do next = next->next;
-    while (next != current_task && next->state != TASK_READY);
+    if (!found && first_idle) {
+        next = first_idle;
+        found = 1;
+    }
 
-    if (next->state == TASK_READY) {
+    if (found) {
         task_t *prev = current_task;
         current_task = next;
         current_task->state = TASK_RUNNING;
-        if (prev->state != TASK_TERMINATED) prev->state = TASK_READY;
+        if (prev->state == TASK_RUNNING) {
+            prev->state = TASK_READY;
+        }
         context_switch(&prev->esp, next->esp);
+    } else {
+        sti();
+        hlt();
+        cli();
+        schedule();
     }
 }
