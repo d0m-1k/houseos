@@ -1,4 +1,6 @@
+#ifdef ENABLE_VGA
 #include <drivers/vga.h>
+#endif
 #include <drivers/keyboard.h>
 #include <drivers/mouse.h>
 #include <asm/idt.h>

@@ -3,8 +3,24 @@
 #include <stdint.h>
 #include <string.h>
 #include <progs/snake.h>
+#include <kernel/kernel.h>
+#ifdef ENABLE_VGA
 #include <drivers/vga.h>
+#endif
 #include <drivers/keyboard.h>
+
+#ifndef ENABLE_VGA
+#define VGA_WIDTH 80
+#define VGA_HEIGHT 25
+#define vga_cursor_set(...) ((void)0)
+#define vga_put_char(...) ((void)0)
+#define vga_print(...) ((void)0)
+#define vga_clear(...) ((void)0)
+#define vga_cursor_disable(...) ((void)0)
+#define vga_cursor_update(...) ((void)0)
+#define vga_cursor_enable(...) ((void)0)
+#define vga_color_make(...) ((uint8_t)0)
+#endif
 
 #define MAP_X  0
 #define MAP_Y  1

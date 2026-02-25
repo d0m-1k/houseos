@@ -1,10 +1,25 @@
 #include <drivers/keyboard.h>
+#include <kernel/kernel.h>
+#ifdef ENABLE_VGA
 #include <drivers/vga.h>
+#endif
 #include <asm/port.h>
 #include <asm/processor.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+
+#ifndef ENABLE_VGA
+#define vga_print(...) ((void)0)
+#define vga_put_char(...) ((void)0)
+#define vga_cursor_update(...) ((void)0)
+#define vga_backspace(...) ((void)0)
+#define vga_color_set(...) ((void)0)
+#define vga_color_make(...) ((uint8_t)0)
+#define VGA_COLOR_LIGHT_RED 0
+#define VGA_COLOR_BLACK 0
+#define VGA_COLOR_LIGHT_GREY 0
+#endif
 
 static char keyboard_buffer[KEYBOARD_BUFFER_SIZE];
 static size_t buffer_head = 0;

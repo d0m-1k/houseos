@@ -1,5 +1,8 @@
 #include <asm/mm.h>
+#include <kernel/kernel.h>
+#ifdef ENABLE_VGA
 #include <drivers/vga.h>
+#endif
 #include <string.h>
 #include <stdint.h>
 
@@ -201,7 +204,9 @@ void* krealloc(void* ptr, size_t size) {
 
     block_header_t* block = get_block_from_payload(ptr);
     if (!block || block->magic != HEAP_MAGIC) {
+#ifdef ENABLE_VGA
         vga_print("Heap corruption detected!\n");
+#endif
         return NULL;
     }
 
@@ -228,12 +233,16 @@ void kfree(void* ptr) {
 
     block_header_t* block = get_block_from_payload(ptr);
     if (!block || block->magic != HEAP_MAGIC) {
+#ifdef ENABLE_VGA
         vga_print("Invalid kfree() call!\n");
+#endif
         return;
     }
 
     if (block->is_free) {
+#ifdef ENABLE_VGA
         vga_print("Double free detected!\n");
+#endif
         return;
     }
 

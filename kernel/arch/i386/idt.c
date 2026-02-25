@@ -1,5 +1,8 @@
 #include <asm/idt.h>
+#include <kernel/kernel.h>
+#ifdef ENABLE_VGA
 #include <drivers/vga.h>
+#endif
 #include <drivers/keyboard.h>
 #include <drivers/mouse.h>
 #include <asm/port.h>
@@ -41,8 +44,10 @@ isr(32) isr(33) isr(44)
 
 void __attribute__((interrupt)) default_handler(struct interrupt_frame* frame) {
     (void)(frame);
+#ifdef ENABLE_VGA
     vga_color_set(vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_RED));
     vga_print("Unhandled interrupt\n");
+#endif
     while (1);
 }
 
@@ -74,12 +79,16 @@ void idt_handler(uint8_t num, uint32_t err_code) {
         handler(num, err_code);
     } else {
         if (num < 32) {
+#ifdef ENABLE_VGA
             vga_color_set(vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_RED));
             vga_print("Fatal exception\n");
+#endif
             while (1) __asm__ __volatile__("hlt");
         } else {
+#ifdef ENABLE_VGA
             vga_color_set(vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_RED));
             vga_print("Unhandled interrupt\n");
+#endif
         }
     }
 

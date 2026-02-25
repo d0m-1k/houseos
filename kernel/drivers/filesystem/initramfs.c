@@ -1,5 +1,4 @@
 #include <drivers/filesystem/initramfs.h>
-#include <drivers/vga.h>
 #include <asm/mm.h>
 #include <stdint.h>
 #include <string.h>

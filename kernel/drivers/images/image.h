@@ -10,6 +10,7 @@ typedef enum {
     IMAGE_TYPE_BMP,
     IMAGE_TYPE_PNG,
     IMAGE_TYPE_JPEG,
+    IMAGE_TYPE_TXT,
     IMAGE_TYPE_UNKNOWN
 } image_type_t;
 
