@@ -18,7 +18,7 @@ _start:
     cmp bx, 0xAA55
     jne .lba_error
 
-    ; initramfs: 3 x 32 sectors (LBA 6..101) -> 0x8000..0x8BFF
+    ; initramfs: 4 x 32 sectors (LBA 6..133) -> 0x8000..0x8FFF
     mov dword [dap_start_lba], 6
     mov word [dap_segment], 0x8000
     mov word [dap_sectors], 32
@@ -33,6 +33,12 @@ _start:
 
     mov dword [dap_start_lba], 70
     mov word [dap_segment], 0x8800
+    mov word [dap_sectors], 32
+    call read_lba
+    jc .disk_initramfs_error
+
+    mov dword [dap_start_lba], 102
+    mov word [dap_segment], 0x8C00
     mov word [dap_sectors], 32
     call read_lba
     jc .disk_initramfs_error

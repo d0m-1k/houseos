@@ -4,9 +4,38 @@
 #include <string.h>
 #include <stdio.h>
 
+#define MAX_LINE 1024
+#define MAX_ARGS 32
+#define MAX_TOKEN 160
+#define MAX_VARS 16
+#define MAX_VAR_NAME 24
+#define MAX_VAR_VALUE 160
+#define MAX_HISTORY 64
+#define MAX_HISTORY_LINE 256
+
 static char g_path[128] = "/bin";
 static char g_pwd[128] = "/";
 static char g_tty_name[16] = "tty?";
+
+static char g_var_name[MAX_VARS][MAX_VAR_NAME];
+static char g_var_val[MAX_VARS][MAX_VAR_VALUE];
+static uint32_t g_var_count = 0;
+
+static char g_history[MAX_HISTORY][MAX_HISTORY_LINE];
+static uint32_t g_history_count = 0;
+static uint32_t g_history_next = 0;
+
+static int is_space(char c) {
+    return (c == ' ' || c == '\t' || c == '\n' || c == '\r');
+}
+
+static int is_name_start(char c) {
+    return (c == '_') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+static int is_name_char(char c) {
+    return is_name_start(c) || (c >= '0' && c <= '9');
+}
 
 static int streq_n(const char *a, const char *b, uint32_t n) {
     for (uint32_t i = 0; i < n; i++) {
@@ -44,6 +73,97 @@ static int read_line(char *buf, uint32_t cap) {
         n--;
     }
     return n;
+}
+
+static char *trim_ws(char *s) {
+    uint32_t len;
+    if (!s) return s;
+    while (*s && is_space(*s)) s++;
+    len = (uint32_t)strlen(s);
+    while (len > 0 && is_space(s[len - 1])) {
+        s[len - 1] = '\0';
+        len--;
+    }
+    return s;
+}
+
+static void history_push(const char *line) {
+    uint32_t len;
+    char clean[MAX_HISTORY_LINE];
+    uint32_t w = 0;
+    if (!line || line[0] == '\0') return;
+    len = (uint32_t)strlen(line);
+    for (uint32_t i = 0; i < len && w + 1 < MAX_HISTORY_LINE; i++) {
+        char c = line[i];
+        if (c == '\n' || c == '\r' || c == '\t' || (c >= 32 && c <= 126)) clean[w++] = c;
+    }
+    if (w == 0) return;
+    clean[w] = '\0';
+    memcpy(g_history[g_history_next], clean, w + 1);
+    g_history_next = (g_history_next + 1) % MAX_HISTORY;
+    if (g_history_count < MAX_HISTORY) g_history_count++;
+}
+
+static const char *get_var(const char *name) {
+    if (!name) return NULL;
+    if (strcmp(name, "PATH") == 0) return g_path;
+    if (strcmp(name, "PWD") == 0) return g_pwd;
+    if (strcmp(name, "TTY") == 0) return g_tty_name;
+
+    for (uint32_t i = 0; i < g_var_count; i++) {
+        if (strcmp(g_var_name[i], name) == 0) return g_var_val[i];
+    }
+    return NULL;
+}
+
+static int set_var(const char *name, const char *value) {
+    if (!name || !value || !is_name_start(name[0])) return -1;
+    for (uint32_t i = 1; name[i]; i++) {
+        if (!is_name_char(name[i])) return -1;
+    }
+
+    if (strcmp(name, "PATH") == 0) {
+        strncpy(g_path, value, sizeof(g_path) - 1);
+        g_path[sizeof(g_path) - 1] = '\0';
+        return 0;
+    }
+    if (strcmp(name, "PWD") == 0) {
+        strncpy(g_pwd, value, sizeof(g_pwd) - 1);
+        g_pwd[sizeof(g_pwd) - 1] = '\0';
+        return 0;
+    }
+
+    for (uint32_t i = 0; i < g_var_count; i++) {
+        if (strcmp(g_var_name[i], name) == 0) {
+            strncpy(g_var_val[i], value, MAX_VAR_VALUE - 1);
+            g_var_val[i][MAX_VAR_VALUE - 1] = '\0';
+            return 0;
+        }
+    }
+
+    if (g_var_count >= MAX_VARS) return -1;
+    strncpy(g_var_name[g_var_count], name, MAX_VAR_NAME - 1);
+    g_var_name[g_var_count][MAX_VAR_NAME - 1] = '\0';
+    strncpy(g_var_val[g_var_count], value, MAX_VAR_VALUE - 1);
+    g_var_val[g_var_count][MAX_VAR_VALUE - 1] = '\0';
+    g_var_count++;
+    return 0;
+}
+
+static int unset_var(const char *name) {
+    if (!name) return -1;
+    if (strcmp(name, "PATH") == 0 || strcmp(name, "PWD") == 0 || strcmp(name, "TTY") == 0) return -1;
+    for (uint32_t i = 0; i < g_var_count; i++) {
+        if (strcmp(g_var_name[i], name) == 0) {
+            for (uint32_t j = i + 1; j < g_var_count; j++) {
+                strcpy(g_var_name[j - 1], g_var_name[j]);
+                strcpy(g_var_val[j - 1], g_var_val[j]);
+            }
+            g_var_count--;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static int normalize_path(const char *in, char *out, uint32_t cap) {
@@ -106,13 +226,6 @@ static int normalize_path(const char *in, char *out, uint32_t cap) {
     if (o == 0) out[o++] = '/';
     out[o] = '\0';
     return 0;
-}
-
-static const char *get_var(const char *name) {
-    if (!name) return NULL;
-    if (strcmp(name, "PATH") == 0) return g_path;
-    if (strcmp(name, "PWD") == 0) return g_pwd;
-    return NULL;
 }
 
 static int try_exec_from_path(const char *name) {
@@ -246,172 +359,380 @@ static void cmd_mouseinfo(void) {
     close(fd);
 }
 
-int main(void) {
-    char line[1024];
-    char buf[512];
-    char abs[160];
+static int append_char(char *dst, uint32_t cap, uint32_t *len, char c) {
+    if (*len + 1 >= cap) return -1;
+    dst[*len] = c;
+    (*len)++;
+    dst[*len] = '\0';
+    return 0;
+}
 
-    update_tty_name();
-    printf("houseos shell in %s\n", g_tty_name);
-    printf("commands: ls cat mkdir mkfifo mksock touch rm rmdir tee run path setpath pwd cd chvt fbinfo ttyinfo kbdinfo mouseinfo exit\n");
+static int append_text(char *dst, uint32_t cap, uint32_t *len, const char *src) {
+    if (!src) return 0;
+    for (uint32_t i = 0; src[i]; i++) {
+        if (append_char(dst, cap, len, src[i]) != 0) return -1;
+    }
+    return 0;
+}
 
-    for (;;) {
-        printf("sh:%s> ", g_pwd);
-        if (read_line(line, sizeof(line)) <= 0) continue;
+static int parse_argv(const char *cmd, char argv[MAX_ARGS][MAX_TOKEN], int *argc_out) {
+    int argc = 0;
+    uint32_t i = 0;
 
-        if (strcmp(line, "path") == 0) {
-            fprintf(stdout, "PATH=%s\nPWD=%s\n", g_path, g_pwd);
-            continue;
-        }
-        if (streq_n(line, "setpath ", 8)) {
-            strncpy(g_path, line + 8, sizeof(g_path) - 1);
-            g_path[sizeof(g_path) - 1] = '\0';
-            continue;
-        }
-        if (strcmp(line, "pwd") == 0) {
-            fprintf(stdout, "%s\n", g_pwd);
-            continue;
-        }
-        if (strcmp(line, "cd") == 0) {
-            g_pwd[0] = '/';
-            g_pwd[1] = '\0';
-            continue;
-        }
-        if (streq_n(line, "cd ", 3)) {
-            if (normalize_path(line + 3, abs, sizeof(abs)) != 0 || list(abs, buf, sizeof(buf)) < 0) {
-                fprintf(stderr, "cd failed\n");
-            } else {
-                strncpy(g_pwd, abs, sizeof(g_pwd) - 1);
-                g_pwd[sizeof(g_pwd) - 1] = '\0';
-            }
-            continue;
-        }
-        if (streq_n(line, "chvt ", 5)) {
-            cmd_chvt(line + 5);
-            continue;
-        }
-        if (strcmp(line, "fbinfo") == 0) {
-            cmd_fbinfo();
-            continue;
-        }
-        if (strcmp(line, "ttyinfo") == 0) {
-            cmd_ttyinfo();
-            continue;
-        }
-        if (strcmp(line, "kbdinfo") == 0) {
-            cmd_kbdinfo();
-            continue;
-        }
-        if (strcmp(line, "mouseinfo") == 0) {
-            cmd_mouseinfo();
-            continue;
-        }
-        if (streq_n(line, "echo ", 5)) {
-            if (line[5] == '$') {
-                const char *v = get_var(line + 6);
-                if (v) fprintf(stdout, "%s\n", v);
-                else fprintf(stdout, "\n");
-            } else {
-                fprintf(stdout, "%s\n", line + 5);
-            }
-            continue;
-        }
-        if (strcmp(line, "ls") == 0) {
-            int32_t n = list(g_pwd, buf, sizeof(buf));
-            if (n < 0) fprintf(stderr, "ls failed\n");
-            else fprintf(stdout, "%s\n", buf);
-            continue;
-        }
-        if (streq_n(line, "ls ", 3)) {
-            if (normalize_path(line + 3, abs, sizeof(abs)) != 0) {
-                fprintf(stderr, "ls failed\n");
+    while (cmd[i]) {
+        uint32_t tlen = 0;
+        int in_sq = 0;
+        int in_dq = 0;
+
+        while (cmd[i] && is_space(cmd[i])) i++;
+        if (!cmd[i]) break;
+        if (cmd[i] == '#') break;
+
+        if (argc >= MAX_ARGS) return -1;
+        argv[argc][0] = '\0';
+
+        while (cmd[i]) {
+            char c = cmd[i];
+            if (!in_sq && !in_dq && is_space(c)) break;
+
+            if (!in_dq && c == '\'') {
+                in_sq = !in_sq;
+                i++;
                 continue;
             }
+            if (!in_sq && c == '"') {
+                in_dq = !in_dq;
+                i++;
+                continue;
+            }
+            if (!in_sq && c == '\\' && cmd[i + 1]) {
+                i++;
+                c = cmd[i];
+                if (append_char(argv[argc], MAX_TOKEN, &tlen, c) != 0) return -1;
+                i++;
+                continue;
+            }
+            if (!in_sq && c == '$') {
+                char name[MAX_VAR_NAME];
+                uint32_t nlen = 0;
+                const char *v;
+                i++;
+                if (!is_name_start(cmd[i])) {
+                    if (append_char(argv[argc], MAX_TOKEN, &tlen, '$') != 0) return -1;
+                    continue;
+                }
+                while (cmd[i] && is_name_char(cmd[i]) && nlen + 1 < sizeof(name)) {
+                    name[nlen++] = cmd[i++];
+                }
+                name[nlen] = '\0';
+                v = get_var(name);
+                if (append_text(argv[argc], MAX_TOKEN, &tlen, v ? v : "") != 0) return -1;
+                continue;
+            }
+
+            if (append_char(argv[argc], MAX_TOKEN, &tlen, c) != 0) return -1;
+            i++;
+        }
+
+        if (in_sq || in_dq) return -1;
+        argc++;
+    }
+
+    *argc_out = argc;
+    return 0;
+}
+
+static int exec_single(const char *cmd) {
+    char argv[MAX_ARGS][MAX_TOKEN];
+    int argc = 0;
+    char abs[160];
+    char buf[512];
+
+    if (parse_argv(cmd, argv, &argc) != 0) {
+        fprintf(stderr, "parse error\n");
+        return -1;
+    }
+    if (argc == 0) return 0;
+
+    if (strcmp(argv[0], "help") == 0) {
+        fprintf(stdout, "builtins: help echo cd pwd export unset env history exit\n");
+        fprintf(stdout, "commands: ls cat mkdir mkfifo mksock touch rm rmdir tee run path setpath chvt fbinfo ttyinfo kbdinfo mouseinfo\n");
+        return 0;
+    }
+
+    if (strcmp(argv[0], "env") == 0 || strcmp(argv[0], "path") == 0) {
+        fprintf(stdout, "PATH=%s\nPWD=%s\nTTY=%s\n", g_path, g_pwd, g_tty_name);
+        for (uint32_t i = 0; i < g_var_count; i++) {
+            fprintf(stdout, "%s=%s\n", g_var_name[i], g_var_val[i]);
+        }
+        return 0;
+    }
+
+    if (strcmp(argv[0], "setpath") == 0) {
+        if (argc < 2) {
+            fprintf(stderr, "usage: setpath <PATH>\n");
+            return -1;
+        }
+        strncpy(g_path, argv[1], sizeof(g_path) - 1);
+        g_path[sizeof(g_path) - 1] = '\0';
+        return 0;
+    }
+
+    if (strcmp(argv[0], "export") == 0) {
+        char *eq;
+        if (argc < 2) {
+            fprintf(stderr, "usage: export NAME=VALUE\n");
+            return -1;
+        }
+        eq = strchr(argv[1], '=');
+        if (!eq) {
+            fprintf(stderr, "usage: export NAME=VALUE\n");
+            return -1;
+        }
+        *eq = '\0';
+        if (set_var(argv[1], eq + 1) != 0) {
+            fprintf(stderr, "export failed\n");
+            return -1;
+        }
+        return 0;
+    }
+
+    if (strcmp(argv[0], "unset") == 0) {
+        if (argc < 2 || unset_var(argv[1]) != 0) {
+            fprintf(stderr, "unset failed\n");
+            return -1;
+        }
+        return 0;
+    }
+
+    if (strcmp(argv[0], "history") == 0) {
+        uint32_t base = (g_history_count < MAX_HISTORY) ? 0 : g_history_next;
+        for (uint32_t i = 0; i < g_history_count; i++) {
+            uint32_t idx = (base + i) % MAX_HISTORY;
+            fprintf(stdout, "%u  %s\n", i + 1, g_history[idx]);
+        }
+        return 0;
+    }
+
+    if (strcmp(argv[0], "pwd") == 0) {
+        fprintf(stdout, "%s\n", g_pwd);
+        return 0;
+    }
+
+    if (strcmp(argv[0], "cd") == 0) {
+        const char *target = (argc >= 2) ? argv[1] : "/";
+        if (normalize_path(target, abs, sizeof(abs)) != 0 || list(abs, buf, sizeof(buf)) < 0) {
+            fprintf(stderr, "cd failed\n");
+            return -1;
+        }
+        strncpy(g_pwd, abs, sizeof(g_pwd) - 1);
+        g_pwd[sizeof(g_pwd) - 1] = '\0';
+        return 0;
+    }
+
+    if (strcmp(argv[0], "echo") == 0) {
+        for (int i = 1; i < argc; i++) {
+            if (i > 1) fprintf(stdout, " ");
+            fprintf(stdout, "%s", argv[i]);
+        }
+        fprintf(stdout, "\n");
+        return 0;
+    }
+
+    if (strcmp(argv[0], "chvt") == 0) {
+        if (argc < 2) {
+            fprintf(stderr, "usage: chvt <0-7>\n");
+            return -1;
+        }
+        cmd_chvt(argv[1]);
+        return 0;
+    }
+
+    if (strcmp(argv[0], "fbinfo") == 0) { cmd_fbinfo(); return 0; }
+    if (strcmp(argv[0], "ttyinfo") == 0) { cmd_ttyinfo(); return 0; }
+    if (strcmp(argv[0], "kbdinfo") == 0) { cmd_kbdinfo(); return 0; }
+    if (strcmp(argv[0], "mouseinfo") == 0) { cmd_mouseinfo(); return 0; }
+
+    if (strcmp(argv[0], "ls") == 0) {
+        const char *target = (argc >= 2) ? argv[1] : g_pwd;
+        if (normalize_path(target, abs, sizeof(abs)) != 0) {
+            fprintf(stderr, "ls failed\n");
+            return -1;
+        }
+        {
             int32_t n = list(abs, buf, sizeof(buf));
             if (n < 0) fprintf(stderr, "ls failed\n");
             else fprintf(stdout, "%s\n", buf);
-            continue;
         }
-        if (streq_n(line, "cat ", 4)) {
-            if (normalize_path(line + 4, abs, sizeof(abs)) != 0) {
-                fprintf(stderr, "cat open failed\n");
-                continue;
-            }
-            int fd = open(abs, 0);
-            if (fd < 0) {
-                fprintf(stderr, "cat open failed\n");
-                continue;
-            }
-            for (;;) {
-                int32_t n = read(fd, buf, sizeof(buf) - 1);
-                if (n <= 0) break;
-                buf[n] = '\0';
-                fprintf(stdout, "%s", buf);
-                if (n < (int32_t)(sizeof(buf) - 1)) break;
-            }
-            fprintf(stdout, "\n");
-            close(fd);
-            continue;
-        }
-        if (streq_n(line, "mkdir ", 6)) {
-            if (normalize_path(line + 6, abs, sizeof(abs)) != 0 || mkdir(abs) != 0) fprintf(stderr, "mkdir failed\n");
-            continue;
-        }
-        if (streq_n(line, "mkfifo ", 7)) {
-            if (normalize_path(line + 7, abs, sizeof(abs)) != 0 || mkfifo(abs) != 0) fprintf(stderr, "mkfifo failed\n");
-            continue;
-        }
-        if (streq_n(line, "mksock ", 7)) {
-            if (normalize_path(line + 7, abs, sizeof(abs)) != 0 || mksock(abs) != 0) fprintf(stderr, "mksock failed\n");
-            continue;
-        }
-        if (streq_n(line, "touch ", 6)) {
-            if (normalize_path(line + 6, abs, sizeof(abs)) != 0) {
-                fprintf(stderr, "touch failed\n");
-                continue;
-            }
-            int fd = open(abs, 1);
-            if (fd < 0) fprintf(stderr, "touch failed\n");
-            else close(fd);
-            continue;
-        }
-        if (streq_n(line, "rm ", 3)) {
-            if (normalize_path(line + 3, abs, sizeof(abs)) != 0 || unlink(abs) != 0) fprintf(stderr, "rm failed\n");
-            continue;
-        }
-        if (streq_n(line, "rmdir ", 6)) {
-            if (normalize_path(line + 6, abs, sizeof(abs)) != 0 || rmdir(abs) != 0) fprintf(stderr, "rmdir failed\n");
-            continue;
-        }
-        if (streq_n(line, "tee ", 4)) {
-            if (normalize_path(line + 4, abs, sizeof(abs)) != 0) {
-                fprintf(stderr, "tee open failed\n");
-                continue;
-            }
-            int fd = open(abs, 1);
-            char ln[1024];
-            int32_t n;
-            if (fd < 0) {
-                fprintf(stderr, "tee open failed\n");
-                continue;
-            }
-            n = read(fileno(stdin), ln, sizeof(ln) - 1);
-            if (n > 0) {
-                ln[n] = '\0';
-                write(fileno(stdout), ln, (uint32_t)n);
-                append(fd, ln, (uint32_t)n);
-            }
-            close(fd);
-            continue;
-        }
-        if (streq_n(line, "run ", 4)) {
-            if (try_exec_from_path(line + 4) != 0) fprintf(stderr, "exec failed\n");
-            continue;
-        }
-        if (strcmp(line, "exit") == 0) {
-            exit(0);
-        }
+        return 0;
+    }
 
-        if (try_exec_from_path(line) != 0) fprintf(stderr, "unknown command\n");
+    if (strcmp(argv[0], "cat") == 0) {
+        int fd;
+        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0) {
+            fprintf(stderr, "cat open failed\n");
+            return -1;
+        }
+        fd = open(abs, 0);
+        if (fd < 0) {
+            fprintf(stderr, "cat open failed\n");
+            return -1;
+        }
+        for (;;) {
+            int32_t n = read(fd, buf, sizeof(buf) - 1);
+            if (n <= 0) break;
+            buf[n] = '\0';
+            fprintf(stdout, "%s", buf);
+            if (n < (int32_t)(sizeof(buf) - 1)) break;
+        }
+        fprintf(stdout, "\n");
+        close(fd);
+        return 0;
+    }
+
+    if (strcmp(argv[0], "mkdir") == 0) {
+        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0 || mkdir(abs) != 0) {
+            fprintf(stderr, "mkdir failed\n");
+            return -1;
+        }
+        return 0;
+    }
+    if (strcmp(argv[0], "mkfifo") == 0) {
+        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0 || mkfifo(abs) != 0) {
+            fprintf(stderr, "mkfifo failed\n");
+            return -1;
+        }
+        return 0;
+    }
+    if (strcmp(argv[0], "mksock") == 0) {
+        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0 || mksock(abs) != 0) {
+            fprintf(stderr, "mksock failed\n");
+            return -1;
+        }
+        return 0;
+    }
+    if (strcmp(argv[0], "touch") == 0) {
+        int fd;
+        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0) {
+            fprintf(stderr, "touch failed\n");
+            return -1;
+        }
+        fd = open(abs, 1);
+        if (fd < 0) {
+            fprintf(stderr, "touch failed\n");
+            return -1;
+        }
+        close(fd);
+        return 0;
+    }
+    if (strcmp(argv[0], "rm") == 0) {
+        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0 || unlink(abs) != 0) {
+            fprintf(stderr, "rm failed\n");
+            return -1;
+        }
+        return 0;
+    }
+    if (strcmp(argv[0], "rmdir") == 0) {
+        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0 || rmdir(abs) != 0) {
+            fprintf(stderr, "rmdir failed\n");
+            return -1;
+        }
+        return 0;
+    }
+    if (strcmp(argv[0], "tee") == 0) {
+        int fd;
+        char ln[MAX_LINE];
+        int32_t n;
+        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0) {
+            fprintf(stderr, "tee open failed\n");
+            return -1;
+        }
+        fd = open(abs, 1);
+        if (fd < 0) {
+            fprintf(stderr, "tee open failed\n");
+            return -1;
+        }
+        n = read(fileno(stdin), ln, sizeof(ln) - 1);
+        if (n > 0) {
+            ln[n] = '\0';
+            write(fileno(stdout), ln, (uint32_t)n);
+            append(fd, ln, (uint32_t)n);
+        }
+        close(fd);
+        return 0;
+    }
+    if (strcmp(argv[0], "run") == 0) {
+        if (argc < 2 || try_exec_from_path(argv[1]) != 0) {
+            fprintf(stderr, "exec failed\n");
+            return -1;
+        }
+        return 0;
+    }
+
+    if (strcmp(argv[0], "exit") == 0) {
+        exit(0);
+        return 0;
+    }
+
+    if (try_exec_from_path(argv[0]) != 0) {
+        fprintf(stderr, "unknown command\n");
+        return -1;
+    }
+    return 0;
+}
+
+static int exec_line(char *line) {
+    uint32_t i = 0;
+    uint32_t start = 0;
+    int in_sq = 0;
+    int in_dq = 0;
+
+    while (1) {
+        char c = line[i];
+        int split = 0;
+        if (c == '\\' && line[i + 1]) {
+            i += 2;
+            continue;
+        }
+        if (c == '\'' && !in_dq) in_sq = !in_sq;
+        else if (c == '"' && !in_sq) in_dq = !in_dq;
+
+        if (((c == ';' || c == '\n' || c == '\r') && !in_sq && !in_dq) || c == '\0') split = 1;
+
+        if (split) {
+            char save = line[i];
+            char *seg;
+            line[i] = '\0';
+            seg = trim_ws(line + start);
+            if (seg[0]) (void)exec_single(seg);
+            line[i] = save;
+            if (c == '\0') break;
+            start = i + 1;
+        }
+        i++;
+    }
+
+    if (in_sq || in_dq) {
+        fprintf(stderr, "parse error\n");
+        return -1;
+    }
+    return 0;
+}
+
+int main(void) {
+    char line[MAX_LINE];
+
+    update_tty_name();
+    (void)set_var("PATH", g_path);
+    (void)set_var("PWD", g_pwd);
+    printf("houseos shell in %s\n", g_tty_name);
+    printf("bash-like mode: quotes, ;, $VAR, export/unset/history/help\n");
+
+    for (;;) {
+        update_tty_name();
+        printf("sh:%s$ ", g_pwd);
+        if (read_line(line, sizeof(line)) <= 0) continue;
+        history_push(line);
+        (void)exec_line(line);
     }
 }
