@@ -7,4 +7,4 @@ $(TARGET):
 	cd data; find . | cpio -o -H newc > ../$@
 
 clean:
-	rm $(TARGET)
+	rm -f $(TARGET)

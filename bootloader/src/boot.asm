@@ -18,26 +18,74 @@ _start:
     cmp bx, 0xAA55
     jne .lba_error
 
+    ; initramfs: 3 x 32 sectors (LBA 6..101) -> 0x8000..0x8BFF
     mov dword [dap_start_lba], 6
-    mov word [dap_offset], 0x0000
-    mov word [dap_segment], 0x4000
-    mov word [dap_sectors], 64
+    mov word [dap_segment], 0x8000
+    mov word [dap_sectors], 32
+    call read_lba
+    jc .disk_initramfs_error
+
+    mov dword [dap_start_lba], 38
+    mov word [dap_segment], 0x8400
+    mov word [dap_sectors], 32
     call read_lba
     jc .disk_initramfs_error
 
     mov dword [dap_start_lba], 70
-    mov word [dap_offset], 0x0000
+    mov word [dap_segment], 0x8800
+    mov word [dap_sectors], 32
+    call read_lba
+    jc .disk_initramfs_error
+
+    ; kernel: 8 x 32 sectors (LBA 134..389) -> 0x1000..0x2FFF
+    mov dword [dap_start_lba], 134
     mov word [dap_segment], 0x1000
-    mov word [dap_sectors], 128
+    mov word [dap_sectors], 32
+    call read_lba
+    jc .disk_kernel_error
+
+    mov dword [dap_start_lba], 166
+    mov word [dap_segment], 0x1400
+    mov word [dap_sectors], 32
     call read_lba
     jc .disk_kernel_error
 
     mov dword [dap_start_lba], 198
-    mov word [dap_offset], 0x0000
-    mov word [dap_segment], 0x2000
-    mov word [dap_sectors], 128
+    mov word [dap_segment], 0x1800
+    mov word [dap_sectors], 32
     call read_lba
     jc .disk_kernel_error
+
+    mov dword [dap_start_lba], 230
+    mov word [dap_segment], 0x1C00
+    mov word [dap_sectors], 32
+    call read_lba
+    jc .disk_kernel_error
+
+    mov dword [dap_start_lba], 262
+    mov word [dap_segment], 0x2000
+    mov word [dap_sectors], 32
+    call read_lba
+    jc .disk_kernel_error
+
+    mov dword [dap_start_lba], 294
+    mov word [dap_segment], 0x2400
+    mov word [dap_sectors], 32
+    call read_lba
+    jc .disk_kernel_error
+
+    mov dword [dap_start_lba], 326
+    mov word [dap_segment], 0x2800
+    mov word [dap_sectors], 32
+    call read_lba
+    jc .disk_kernel_error
+
+    mov dword [dap_start_lba], 358
+    mov word [dap_segment], 0x2C00
+    mov word [dap_sectors], 32
+    call read_lba
+    jc .disk_kernel_error
+
     
     call get_memory_map
     call vesa_load

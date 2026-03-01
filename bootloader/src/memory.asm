@@ -9,8 +9,8 @@ get_memory_map:
     mov di, 0x5000
     
     xor ebx, ebx
-    mov edx, 0x534D4150   ; 'SMAP'
     mov eax, 0xE820
+    mov edx, 0x534D4150
     mov ecx, 20
     int 0x15
     jc .error
@@ -24,6 +24,7 @@ get_memory_map:
     jz .done
     
     mov eax, 0xE820
+    mov edx, 0x534D4150
     mov ecx, 20
     int 0x15
     jc .done

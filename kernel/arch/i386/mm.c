@@ -141,17 +141,31 @@ void mm_init(void) {
 }
 
 void kmalloc_init(void) {
-    uint64_t heap_base = 0x200000;
+    uint64_t heap_base = 0x900000;
     uint64_t heap_size = 0x400000;
+    int heap_region_found = 0;
 
     for (uint32_t i = 0; i < global_mmap.count; i++) {
         struct mm_map_entry *ent = &global_mmap.entries[i];
         uint64_t base = ((uint64_t)ent->base_high << 32) | ent->base_low;
         uint64_t length = ((uint64_t)ent->length_high << 32) | ent->length_low;
-        if (ent->type == 1 && base >= 0x100000 && length >= 0x400000) {
-            heap_base = base;
-            heap_size = 0x400000;
+        uint64_t end = base + length;
+        if (ent->type == 1 && base <= heap_base && end >= (heap_base + heap_size)) {
+            heap_region_found = 1;
             break;
+        }
+    }
+
+    if (!heap_region_found) {
+        for (uint32_t i = 0; i < global_mmap.count; i++) {
+            struct mm_map_entry *ent = &global_mmap.entries[i];
+            uint64_t base = ((uint64_t)ent->base_high << 32) | ent->base_low;
+            uint64_t length = ((uint64_t)ent->length_high << 32) | ent->length_low;
+            if (ent->type == 1 && base >= 0x900000 && length >= heap_size) {
+                heap_base = base;
+                heap_region_found = 1;
+                break;
+            }
         }
     }
 

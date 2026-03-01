@@ -14,7 +14,7 @@ vesa_load:
     mov ax, ds
     mov es, ax
     mov si, vesa_info_buffer
-    mov di, 0x8000
+    mov di, 0x9000
     mov cx, 512
     rep movsb
     pop ds
@@ -41,7 +41,7 @@ vesa_load:
     mov ax, ds
     mov es, ax
     mov si, mode_info_buffer
-    mov di, 0x8100
+    mov di, 0x9100
     mov cx, 256
     rep movsb
     pop es

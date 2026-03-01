@@ -11,12 +11,12 @@ _start:
     mov sp, 0x7C00
 
     mov ah, 0x02
-    mov al, 4      ; Количество секторов
+    mov al, 4
     mov ch, 0x00
-    mov cl, 2      ; Начинаем со 2-го сектора
+    mov cl, 2
     mov dh, 0x00
     mov dl, 0x80
-    mov bx, 0x0000 ; ES:BX = 0x0000:0x7E00
+    mov bx, 0x0000
     mov es, bx
     mov bx, 0x7E00
     int 0x13
@@ -27,9 +27,9 @@ _start:
 .error:
     mov si, disk_err_msg
     call print
-.end:
+.halt:
     hlt
-    jmp .end
+    jmp .halt
 
 %include "print.asm"
 
@@ -37,14 +37,13 @@ disk_err_msg db "MBR: Disk read error!", 0x0D, 0x0A, 0
 
 times 446-($-$$) db 0
 
-; Таблица разделов
 partion1:
-    db 0x80            ; Активный раздел
-    db 0, 0, 0         ; CHS начала
-    db 0x30            ; Тип (FAT32 LBA)
-    db 0, 0, 0         ; CHS конца
-    dd 1               ; LBA начала
-    dd 32              ; Количество секторов
+    db 0x80
+    db 0, 0, 0
+    db 0x30
+    db 0, 0, 0
+    dd 1
+    dd 32
 
 partion2: times 16 db 0
 partion3: times 16 db 0

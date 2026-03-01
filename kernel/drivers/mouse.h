@@ -16,3 +16,6 @@ void mouse_handler(void);
 bool mouse_available(void);
 mouse_packet_t mouse_get_packet(void);
 bool mouse_try_get_packet(mouse_packet_t* out);
+int16_t mouse_get_x(void);
+int16_t mouse_get_y(void);
+uint8_t mouse_get_buttons(void);

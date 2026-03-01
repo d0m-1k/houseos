@@ -1,14 +1,12 @@
 #include <asm/idt.h>
-#include <kernel/kernel.h>
-#ifdef ENABLE_VGA
-#include <drivers/vga.h>
-#endif
 #include <drivers/keyboard.h>
 #include <drivers/mouse.h>
+#include <drivers/syscall.h>
 #include <asm/port.h>
 #include <asm/processor.h>
 #include <asm/task.h>
 #include <asm/timer.h>
+#include <asm/gdt.h>
 
 struct idt_entry idt[IDT_ENTRIES];
 struct struct_ptr idtp;
@@ -37,18 +35,15 @@ void idt_load(uint32_t idt_ptr) {
 isr(0) isr(1) isr(2) isr(3) isr(4) isr(5) isr(6) isr(7)
 isr_err(8) isr(9) isr_err(10) isr_err(11) isr_err(12) isr_err(13) isr_err(14)
 isr(15) isr(16) isr_err(17) isr(18) isr(19)
-isr(32) isr(33) isr(44)
+isr(32) isr(33) isr(34) isr(35) isr(36) isr(37) isr(38) isr(39)
+isr(40) isr(41) isr(42) isr(43) isr(44) isr(45) isr(46) isr(47)
 
 #undef isr
 #undef isr_err
 
 void __attribute__((interrupt)) default_handler(struct interrupt_frame* frame) {
     (void)(frame);
-#ifdef ENABLE_VGA
-    vga_color_set(vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_RED));
-    vga_print("Unhandled interrupt\n");
-#endif
-    while (1);
+    while (1) __asm__ __volatile__("hlt");
 }
 
 void pic_init() {
@@ -79,16 +74,7 @@ void idt_handler(uint8_t num, uint32_t err_code) {
         handler(num, err_code);
     } else {
         if (num < 32) {
-#ifdef ENABLE_VGA
-            vga_color_set(vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_RED));
-            vga_print("Fatal exception\n");
-#endif
             while (1) __asm__ __volatile__("hlt");
-        } else {
-#ifdef ENABLE_VGA
-            vga_color_set(vga_color_make(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_RED));
-            vga_print("Unhandled interrupt\n");
-#endif
         }
     }
 
@@ -110,12 +96,15 @@ void idt_init() {
         idt_set_gate(i, (uint32_t)default_handler, 0x08, 0x8E);
     }
 
-    #define set(n) idt_set_gate(n, (uint32_t)i##n, 0x08, 0x8E);
+    #define set(n) idt_set_gate(n, (uint32_t)i##n, GDT_KERNEL_CODE * 8, 0x8E);
     set(0) set(1) set(2) set(3) set(4) set(5) set(6) set(7)
     set(8) set(9) set(10) set(11) set(12) set(13) set(14)
     set(15) set(16) set(17) set(18) set(19)
-    set(32) set(33) set(44)
+    set(32) set(33) set(34) set(35) set(36) set(37) set(38) set(39)
+    set(40) set(41) set(42) set(43) set(44) set(45) set(46) set(47)
     #undef set
+
+    idt_set_gate(0x80, (uint32_t)syscall_handler, GDT_KERNEL_CODE * 8, 0xEE);
 
     idt_load((uint32_t)&idtp);
 }

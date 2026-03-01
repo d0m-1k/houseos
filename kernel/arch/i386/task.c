@@ -1,6 +1,7 @@
 #include <asm/task.h>
 #include <asm/mm.h>
 #include <asm/processor.h>
+#include <asm/tss.h>
 #include <stddef.h>
 
 static void idle_task(void *arg) {
@@ -40,6 +41,7 @@ void task_init(void (*main_task)(void)) {
     idle->state = TASK_READY;
     idle->stack = idle_stack;
     idle->esp = (uint32_t)idle_top;
+    idle->esp0 = (uint32_t)(idle_stack + STACK_SIZE);
     idle->wake_tick = 0;
     idle->next = idle;
 
@@ -50,6 +52,7 @@ void task_init(void (*main_task)(void)) {
     init_task->state = TASK_RUNNING;
     init_task->stack = NULL;
     init_task->esp = get_esp();
+    init_task->esp0 = get_esp();
     init_task->wake_tick = 0;
 
     init_task->next = idle;
@@ -63,7 +66,8 @@ void task_init(void (*main_task)(void)) {
 }
 
 int task_create(void (*entry)(void*), void *arg) {
-    if (task_count >= MAX_TASKS) return -1;
+    int slot = -1;
+    task_t *task = NULL;
 
     uint8_t *stack = (uint8_t*)kmalloc(STACK_SIZE);
     if (!stack) return -1;
@@ -76,22 +80,38 @@ int task_create(void (*entry)(void*), void *arg) {
     *(--top) = 0x202;
     for (int i = 0; i < 7; i++) *(--top) = 0;
 
-    task_t *task = &tasks[task_count++];
+    for (int i = 0; i < task_count; i++) {
+        if (tasks[i].state == TASK_TERMINATED) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot >= 0) {
+        task = &tasks[slot];
+    } else {
+        if (task_count >= MAX_TASKS) {
+            kfree(stack);
+            return -1;
+        }
+        task = &tasks[task_count++];
+        if (ready_head == NULL) {
+            ready_head = task;
+            ready_tail = task;
+            task->next = task;
+        } else {
+            task->next = ready_head;
+            ready_tail->next = task;
+            ready_tail = task;
+        }
+    }
+
     task->pid = next_pid++;
     task->state = TASK_READY;
     task->stack = stack;
     task->esp = (uint32_t)top;
+    task->esp0 = (uint32_t)(stack + STACK_SIZE);
     task->wake_tick = 0;
-
-    if (ready_head == NULL) {
-        ready_head = task;
-        ready_tail = task;
-        task->next = task;
-    } else {
-        task->next = ready_head;
-        ready_tail->next = task;
-        ready_tail = task;
-    }
 
     return task->pid;
 }
@@ -104,7 +124,7 @@ void task_yield(void) {
 
 void task_exit(void) {
     current_task->state = TASK_TERMINATED;
-    if (current_task->stack) kfree(current_task->stack);
+    /* Cannot free the current kernel stack before switching away from it. */
     schedule();
     while (1);
 }
@@ -135,6 +155,7 @@ void schedule(void) {
         task_t *prev = current_task;
         current_task = next;
         current_task->state = TASK_RUNNING;
+        tss.esp0 = current_task->esp0;
         if (prev->state == TASK_RUNNING) {
             prev->state = TASK_READY;
         }
@@ -145,4 +166,11 @@ void schedule(void) {
         cli();
         schedule();
     }
+}
+
+int task_state_by_pid(uint32_t pid) {
+    for (int i = 0; i < task_count; i++) {
+        if (tasks[i].pid == pid) return (int)tasks[i].state;
+    }
+    return -1;
 }

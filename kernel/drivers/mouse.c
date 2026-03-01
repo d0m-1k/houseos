@@ -1,4 +1,5 @@
 #include <drivers/mouse.h>
+#include <drivers/vesa.h>
 #include <asm/port.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -19,6 +20,9 @@ static volatile uint32_t g_count = 0;
 
 static volatile uint8_t g_packet[3];
 static volatile uint8_t g_cycle = 0;
+static volatile int16_t g_x = 0;
+static volatile int16_t g_y = 0;
+static volatile uint8_t g_buttons = 0;
 
 static inline void io_wait_small(void) {
     outb(0x80, 0);
@@ -101,8 +105,8 @@ void mouse_init(void) {
 
     ps2_write_cmd(0x20);
     uint8_t status = ps2_read_data();
-    status |= 0x02;
-    status &= (uint8_t)~0x20;
+    status |= 0x03;
+    status &= (uint8_t)~0x30;
     ps2_write_cmd(0x60);
     ps2_write_data(status);
 
@@ -114,6 +118,9 @@ void mouse_init(void) {
 
     g_cycle = 0;
     g_head = g_tail = g_count = 0;
+    g_x = 0;
+    g_y = 0;
+    g_buttons = 0;
 }
 
 void mouse_handler(void) {
@@ -144,7 +151,34 @@ void mouse_handler(void) {
         p.buttons = b0 & 0x07;
         p.x_movement = (int8_t)b1;
         p.y_movement = (int8_t)b2;
+        g_buttons = p.buttons;
+
+        g_x += p.x_movement;
+        g_y -= p.y_movement;
+
+        if (vesa_is_initialized()) {
+            int16_t max_x = (int16_t)(vesa_get_width() ? (vesa_get_width() - 1) : 0);
+            int16_t max_y = (int16_t)(vesa_get_height() ? (vesa_get_height() - 1) : 0);
+            if (g_x < 0) g_x = 0;
+            if (g_y < 0) g_y = 0;
+            if (g_x > max_x) g_x = max_x;
+            if (g_y > max_y) g_y = max_y;
+        }
+        p.x = g_x;
+        p.y = g_y;
 
         queue_push(p);
     }
+}
+
+int16_t mouse_get_x(void) {
+    return g_x;
+}
+
+int16_t mouse_get_y(void) {
+    return g_y;
+}
+
+uint8_t mouse_get_buttons(void) {
+    return g_buttons;
 }

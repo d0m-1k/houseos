@@ -3,9 +3,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define KEYBOARD_BUFFER_SIZE 256
+#define KEYBOARD_BUFFER_SIZE 4096
 #define SC_MAX 0x57
 #define LAYOUT_COUNT 1
+
+typedef void (*keyboard_hotkey_handler_t)(uint8_t keycode, bool pressed, bool shift, bool ctrl, bool alt);
 
 // Структура события клавиатуры
 struct key_event {
@@ -21,6 +23,14 @@ struct key_event {
 // Специальные клавиши
 enum key_spec {
     KEY_ESC          = 0x01,
+    KEY_1            = 0x02,
+    KEY_2            = 0x03,
+    KEY_3            = 0x04,
+    KEY_4            = 0x05,
+    KEY_5            = 0x06,
+    KEY_6            = 0x07,
+    KEY_7            = 0x08,
+    KEY_8            = 0x09,
     KEY_BACKSPACE    = 0x0E,
     KEY_TAB          = 0x0F,
     KEY_ENTER        = 0x1C,
@@ -119,6 +129,7 @@ bool keyboard_scancode_available(void);
 char keyboard_scancode_to_ascii(uint8_t scancode);
 struct key_event keyboard_get_event(void);
 bool keyboard_event_available(void);
+bool keyboard_try_get_event(struct key_event *out);
 void keyboard_set_echo_mode(bool value);
 bool keyboard_get_echo_mode(void);
 void keyboard_set_leds(bool scroll, bool num, bool caps);
@@ -129,3 +140,4 @@ void keyboard_clear_buffers(void);
 uint8_t keyboard_get_last_scancode(void);
 void keyboard_set_layout(size_t layout_index);
 size_t keyboard_get_layout(void);
+void keyboard_set_hotkey_handler(keyboard_hotkey_handler_t handler);

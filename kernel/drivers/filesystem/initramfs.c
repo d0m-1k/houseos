@@ -34,6 +34,14 @@ static void clean_path(char *path) {
 
 void initramfs_init(memfs *fs) {
     uint8_t *archive = (uint8_t *)INITRAMFS_ADDR;
+    const uintptr_t candidates[] = { INITRAMFS_ADDR, 0x40000, 0x80000 };
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+        struct cpio_header *h = (struct cpio_header *)(uintptr_t)candidates[i];
+        if (!strncmp(h->magic, "070701", 6) || !strncmp(h->magic, "070702", 6)) {
+            archive = (uint8_t *)(uintptr_t)candidates[i];
+            break;
+        }
+    }
     uint8_t *current = archive;
     
     while (1) {
@@ -72,6 +80,10 @@ void initramfs_init(memfs *fs) {
         
         if (CPIO_S_ISDIR(mode)) {
             memfs_create_dir(fs, abs_path);
+        } else if (CPIO_S_ISFIFO(mode)) {
+            memfs_create_fifo(fs, abs_path);
+        } else if (CPIO_S_ISSOCK(mode)) {
+            memfs_create_socket(fs, abs_path);
         } else if (CPIO_S_ISREG(mode)) {
             memfs_create_file(fs, abs_path);
             if (filesize > 0) memfs_write(fs, abs_path, filedata, filesize);

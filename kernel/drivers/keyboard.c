@@ -26,7 +26,7 @@ static size_t buffer_head = 0;
 static size_t buffer_tail = 0;
 static size_t buffer_count = 0;
 
-#define EVENT_BUFFER_SIZE 64
+#define EVENT_BUFFER_SIZE 512
 static struct key_event event_buffer[EVENT_BUFFER_SIZE];
 static size_t event_head = 0;
 static size_t event_tail = 0;
@@ -44,6 +44,7 @@ static bool ext_scancode = false;
 static bool pause_break = false;
 static uint8_t last_scancode = 0;
 static size_t current_layout = 0;
+static keyboard_hotkey_handler_t hotkey_handler = NULL;
 
 static uint8_t pause_buffer[6];
 static int pause_index = 0;
@@ -280,11 +281,6 @@ void keyboard_init(void) {
     
     outb(0x64, 0xAE);
     
-    keyboard_send_command(0xF0);
-    keyboard_read_response();
-    keyboard_send_command(0x02);
-    keyboard_read_response();
-    
     keyboard_send_command(0xF4);
     keyboard_read_response();
     
@@ -340,6 +336,11 @@ void keyboard_handler(void) {
     }
     
     handle_special_key(keycode, pressed);
+
+    if (pressed && alt_pressed && keycode >= KEY_1 && keycode <= KEY_8) {
+        if (hotkey_handler) hotkey_handler(keycode, true, shift_pressed, ctrl_pressed, alt_pressed);
+        return;
+    }
     
     if (pressed) {
         bool effective_shift = shift_pressed ^ caps_lock;
@@ -437,6 +438,12 @@ bool keyboard_event_available(void) {
     return event_count > 0;
 }
 
+bool keyboard_try_get_event(struct key_event *out) {
+    if (!out || event_count == 0) return false;
+    *out = event_buffer_get();
+    return true;
+}
+
 void keyboard_set_leds(bool scroll, bool num, bool caps) {
     scroll_lock = scroll;
     num_lock = num;
@@ -496,4 +503,8 @@ void keyboard_set_layout(size_t layout_index) {
 
 size_t keyboard_get_layout(void) {
     return current_layout;
+}
+
+void keyboard_set_hotkey_handler(keyboard_hotkey_handler_t handler) {
+    hotkey_handler = handler;
 }

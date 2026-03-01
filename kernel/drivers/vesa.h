@@ -3,8 +3,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define VESA_INFO_ADDR 0x8000
-#define MODE_INFO_ADDR 0x8100
+#define VESA_INFO_ADDR 0x9000
+#define MODE_INFO_ADDR 0x9100
 
 typedef struct {
     char signature[4];

@@ -1,5 +1,7 @@
 bits 32
 global _start
+global kernel_stack_bottom
+global kernel_stack_top
 extern kmain
 
 extern __bss_start

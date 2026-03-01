@@ -5,7 +5,6 @@
 #include <asm/processor.h>
 #include <drivers/vesa.h>
 #include <drivers/fonts/font_renderer.h>
-#include <drivers/wm/window_manager.h>
 #include <string.h>
 
 static volatile uint32_t ticks = 0;
@@ -18,7 +17,7 @@ void timer_handler(void) {
         if (task->state == TASK_BLOCKED && task->wake_tick <= ticks) task->state = TASK_READY;
     }
 
-    if (current_task != NULL && !wm_in_frame) schedule();
+    if (current_task != NULL) schedule();
 }
 
 void timer_init(void) {
@@ -43,5 +42,6 @@ void sleep(uint32_t ms) {
     cli();
     current_task->state = TASK_BLOCKED;
     current_task->wake_tick = deadline;
-    task_yield();
+    schedule();
+    sti();
 }

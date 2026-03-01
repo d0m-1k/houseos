@@ -13,6 +13,7 @@ typedef enum {
 
 typedef struct task {
     uint32_t esp;
+    uint32_t esp0;
     uint32_t pid;
     task_state_t state;
     uint8_t *stack;
@@ -25,6 +26,7 @@ int task_create(void (*entry)(void*), void *arg);
 void task_yield(void);
 void task_exit(void);
 void schedule(void);
+int task_state_by_pid(uint32_t pid);
 
 extern task_t *current_task;
 extern task_t *_idle_task;

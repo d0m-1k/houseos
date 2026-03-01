@@ -2,7 +2,7 @@
 
 #include <drivers/filesystem/memfs.h>
 
-#define INITRAMFS_ADDR 0x40000
+#define INITRAMFS_ADDR 0x80000
 
 #define CPIO_S_IFMT   0170000
 #define CPIO_S_IFDIR  0040000
