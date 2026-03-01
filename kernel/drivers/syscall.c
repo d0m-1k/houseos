@@ -55,7 +55,7 @@ static uint8_t g_task_fd_init[MAX_TASKS];
 static const char *g_shell_ttys[] = {
     "/devices/tty1", "/devices/tty2", "/devices/tty3",
     "/devices/tty4", "/devices/tty5", "/devices/tty6", "/devices/tty7",
-    "/devices/ttyS0", "/devices/ttyS1"
+    "/devices/ttyS0"
 };
 
 static int current_task_slot(void) {

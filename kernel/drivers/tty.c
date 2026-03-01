@@ -10,7 +10,7 @@
 #include <string.h>
 
 #define VESA_TTY_COUNT 8
-#define SERIAL_TTY_COUNT 2
+#define SERIAL_TTY_COUNT 1
 #define TTY_HISTORY_MAX 32
 #define TTY_HISTORY_LINE_MAX 1024
 
@@ -34,7 +34,7 @@ typedef struct {
 
 static tty_device_t g_tty_v[VESA_TTY_COUNT];
 static tty_device_t g_tty_s[SERIAL_TTY_COUNT];
-static uint16_t g_serial_ports[SERIAL_TTY_COUNT] = { 0x3F8, 0x2F8 };
+static uint16_t g_serial_ports[SERIAL_TTY_COUNT] = { 0x3F8 };
 static uint32_t g_active_tty = 0;
 static psf_font_t *g_font = NULL;
 static uint32_t g_char_w = 8;

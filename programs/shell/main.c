@@ -681,6 +681,354 @@ static int exec_single(const char *cmd) {
     return 0;
 }
 
+static int split_outside_quotes(const char *s, char delim, uint32_t *pos_out) {
+    int in_sq = 0;
+    int in_dq = 0;
+    uint32_t i = 0;
+    while (s[i]) {
+        char c = s[i];
+        if (c == '\\' && s[i + 1]) {
+            i += 2;
+            continue;
+        }
+        if (c == '\'' && !in_dq) in_sq = !in_sq;
+        else if (c == '"' && !in_sq) in_dq = !in_dq;
+        else if (c == delim && !in_sq && !in_dq) {
+            *pos_out = i;
+            return 1;
+        }
+        i++;
+    }
+    return 0;
+}
+
+typedef struct {
+    char cmd[MAX_LINE];
+    char in_path[160];
+    char out_path[160];
+    char err_path[160];
+    int out_append;
+    int err_append;
+} redir_spec_t;
+
+static void redir_spec_init(redir_spec_t *r) {
+    r->cmd[0] = '\0';
+    r->in_path[0] = '\0';
+    r->out_path[0] = '\0';
+    r->err_path[0] = '\0';
+    r->out_append = 0;
+    r->err_append = 0;
+}
+
+static int read_file_into(const char *path, char *out, uint32_t cap) {
+    int fd;
+    uint32_t len = 0;
+    fd = open(path, 0);
+    if (fd < 0) return -1;
+    while (len + 1 < cap) {
+        int32_t n = read(fd, out + len, cap - len - 1);
+        if (n <= 0) break;
+        len += (uint32_t)n;
+    }
+    out[len] = '\0';
+    close(fd);
+    return 0;
+}
+
+static int write_text_to_file(const char *path, const char *text, int append_mode) {
+    int fd = open(path, 1);
+    uint32_t n;
+    if (fd < 0) return -1;
+    n = (uint32_t)strlen(text);
+    if (append_mode) {
+        if (append(fd, text, n) < 0) {
+            close(fd);
+            return -1;
+        }
+    } else {
+        if (write(fd, text, n) < 0) {
+            close(fd);
+            return -1;
+        }
+    }
+    close(fd);
+    return 0;
+}
+
+static int parse_redirections(const char *src, redir_spec_t *out) {
+    uint32_t i = 0;
+    uint32_t w = 0;
+    int in_sq = 0;
+    int in_dq = 0;
+    redir_spec_init(out);
+
+    while (src[i]) {
+        char c = src[i];
+
+        if (c == '\\' && src[i + 1]) {
+            if (w + 1 >= sizeof(out->cmd)) return -1;
+            out->cmd[w++] = src[i++];
+            out->cmd[w++] = src[i++];
+            continue;
+        }
+        if (c == '\'' && !in_dq) {
+            in_sq = !in_sq;
+            if (w + 1 >= sizeof(out->cmd)) return -1;
+            out->cmd[w++] = src[i++];
+            continue;
+        }
+        if (c == '"' && !in_sq) {
+            in_dq = !in_dq;
+            if (w + 1 >= sizeof(out->cmd)) return -1;
+            out->cmd[w++] = src[i++];
+            continue;
+        }
+
+        if (!in_sq && !in_dq) {
+            int is_err = 0;
+            int is_out = 0;
+            int is_in = 0;
+            int is_append = 0;
+            uint32_t j;
+            char raw[160];
+            char abs[160];
+            uint32_t rlen = 0;
+
+            if (c == '>' || c == '<') {
+                is_out = (c == '>');
+                is_in = (c == '<');
+                if (is_out && src[i + 1] == '>') {
+                    is_append = 1;
+                    i += 2;
+                } else {
+                    i++;
+                }
+            } else if (c == '2' && src[i + 1] == '>') {
+                is_err = 1;
+                i += 2;
+            } else if (c == '&' && src[i + 1] == '2' && src[i + 2] == '>') {
+                is_err = 1;
+                i += 3;
+            } else {
+                if (w + 1 >= sizeof(out->cmd)) return -1;
+                out->cmd[w++] = src[i++];
+                continue;
+            }
+
+            while (src[i] && is_space(src[i])) i++;
+            if (!src[i]) return -1;
+
+            if (src[i] == '"' || src[i] == '\'') {
+                char q = src[i++];
+                while (src[i] && src[i] != q) {
+                    if (rlen + 1 >= sizeof(raw)) return -1;
+                    raw[rlen++] = src[i++];
+                }
+                if (src[i] != q) return -1;
+                i++;
+            } else {
+                j = i;
+                while (src[j] && !is_space(src[j]) && src[j] != '>' && src[j] != '<' && src[j] != '|') j++;
+                while (i < j) {
+                    if (rlen + 1 >= sizeof(raw)) return -1;
+                    raw[rlen++] = src[i++];
+                }
+            }
+            raw[rlen] = '\0';
+            if (normalize_path(raw, abs, sizeof(abs)) != 0) return -1;
+
+            if (is_in) {
+                strncpy(out->in_path, abs, sizeof(out->in_path) - 1);
+                out->in_path[sizeof(out->in_path) - 1] = '\0';
+            } else if (is_out) {
+                strncpy(out->out_path, abs, sizeof(out->out_path) - 1);
+                out->out_path[sizeof(out->out_path) - 1] = '\0';
+                out->out_append = is_append;
+            } else if (is_err) {
+                strncpy(out->err_path, abs, sizeof(out->err_path) - 1);
+                out->err_path[sizeof(out->err_path) - 1] = '\0';
+                out->err_append = 0;
+            }
+            continue;
+        }
+
+        if (w + 1 >= sizeof(out->cmd)) return -1;
+        out->cmd[w++] = src[i++];
+    }
+
+    out->cmd[w] = '\0';
+    return 0;
+}
+
+static int capture_simple_io(const char *cmd, const char *in_data, char *out, uint32_t out_cap, char *err, uint32_t err_cap) {
+    char argv[MAX_ARGS][MAX_TOKEN];
+    int argc = 0;
+    uint32_t olen = 0;
+    uint32_t elen = 0;
+    char abs[160];
+    char buf[256];
+
+    out[0] = '\0';
+    err[0] = '\0';
+    if (parse_argv(cmd, argv, &argc) != 0 || argc == 0) return -1;
+
+    if (strcmp(argv[0], "echo") == 0) {
+        for (int i = 1; i < argc; i++) {
+            if (i > 1 && append_char(out, out_cap, &olen, ' ') != 0) return -1;
+            if (append_text(out, out_cap, &olen, argv[i]) != 0) return -1;
+        }
+        if (append_char(out, out_cap, &olen, '\n') != 0) return -1;
+        return 0;
+    }
+
+    if (strcmp(argv[0], "pwd") == 0) {
+        if (append_text(out, out_cap, &olen, g_pwd) != 0) return -1;
+        if (append_char(out, out_cap, &olen, '\n') != 0) return -1;
+        return 0;
+    }
+
+    if (strcmp(argv[0], "ls") == 0) {
+        const char *target = (argc >= 2) ? argv[1] : g_pwd;
+        int32_t n;
+        if (normalize_path(target, abs, sizeof(abs)) != 0) {
+            (void)append_text(err, err_cap, &elen, "ls failed\n");
+            return -1;
+        }
+        n = list(abs, buf, sizeof(buf));
+        if (n < 0) {
+            (void)append_text(err, err_cap, &elen, "ls failed\n");
+            return -1;
+        }
+        if (append_text(out, out_cap, &olen, buf) != 0) return -1;
+        if (append_char(out, out_cap, &olen, '\n') != 0) return -1;
+        return 0;
+    }
+
+    if (strcmp(argv[0], "cat") == 0) {
+        int fd;
+        if (argc == 1) {
+            if (append_text(out, out_cap, &olen, in_data ? in_data : "") != 0) return -1;
+            return 0;
+        }
+        if (normalize_path(argv[1], abs, sizeof(abs)) != 0) {
+            (void)append_text(err, err_cap, &elen, "cat open failed\n");
+            return -1;
+        }
+        fd = open(abs, 0);
+        if (fd < 0) {
+            (void)append_text(err, err_cap, &elen, "cat open failed\n");
+            return -1;
+        }
+        for (;;) {
+            int32_t n = read(fd, buf, sizeof(buf));
+            if (n <= 0) break;
+            for (int32_t i = 0; i < n; i++) {
+                if (append_char(out, out_cap, &olen, buf[i]) != 0) {
+                    close(fd);
+                    return -1;
+                }
+            }
+            if (n < (int32_t)sizeof(buf)) break;
+        }
+        close(fd);
+        return 0;
+    }
+
+    if (strcmp(argv[0], "help") == 0) {
+        (void)append_text(out, out_cap, &olen, "builtins: help echo cd pwd export unset env history exit\n");
+        return 0;
+    }
+
+    (void)append_text(err, err_cap, &elen, "unknown command\n");
+    return -1;
+}
+
+static int exec_with_redir_or_pipe(char *seg) {
+    uint32_t pos = 0;
+    char left[MAX_LINE];
+    char right[MAX_LINE];
+    redir_spec_t lspec;
+    redir_spec_t rspec;
+    char in_data[2048];
+    char out_data[2048];
+    char err_data[512];
+
+    if (split_outside_quotes(seg, '|', &pos)) {
+        int rc;
+        if (pos >= sizeof(left)) return -1;
+        memcpy(left, seg, pos);
+        left[pos] = '\0';
+        strncpy(right, seg + pos + 1, sizeof(right) - 1);
+        right[sizeof(right) - 1] = '\0';
+
+        if (parse_redirections(trim_ws(left), &lspec) != 0 || parse_redirections(trim_ws(right), &rspec) != 0) {
+            fprintf(stderr, "parse error\n");
+            return -1;
+        }
+
+        in_data[0] = '\0';
+        if (lspec.in_path[0] && read_file_into(lspec.in_path, in_data, sizeof(in_data)) != 0) {
+            fprintf(stderr, "redirect failed\n");
+            return -1;
+        }
+        rc = capture_simple_io(trim_ws(lspec.cmd), in_data, out_data, sizeof(out_data), err_data, sizeof(err_data));
+        if (lspec.err_path[0]) (void)write_text_to_file(lspec.err_path, err_data, lspec.err_append);
+        else if (err_data[0]) fprintf(stderr, "%s", err_data);
+        if (rc != 0) return -1;
+
+        in_data[0] = '\0';
+        if (rspec.in_path[0]) {
+            if (read_file_into(rspec.in_path, in_data, sizeof(in_data)) != 0) {
+                fprintf(stderr, "redirect failed\n");
+                return -1;
+            }
+        } else {
+            strncpy(in_data, out_data, sizeof(in_data) - 1);
+            in_data[sizeof(in_data) - 1] = '\0';
+        }
+
+        rc = capture_simple_io(trim_ws(rspec.cmd), in_data, out_data, sizeof(out_data), err_data, sizeof(err_data));
+        if (rspec.out_path[0]) {
+            if (write_text_to_file(rspec.out_path, out_data, rspec.out_append) != 0) fprintf(stderr, "redirect failed\n");
+        } else {
+            write(fileno(stdout), out_data, (uint32_t)strlen(out_data));
+        }
+        if (rspec.err_path[0]) (void)write_text_to_file(rspec.err_path, err_data, rspec.err_append);
+        else if (err_data[0]) fprintf(stderr, "%s", err_data);
+        return rc;
+    }
+
+    if (strchr(seg, '>') || strchr(seg, '<')) {
+        int rc;
+        if (parse_redirections(trim_ws(seg), &lspec) != 0) {
+            fprintf(stderr, "parse error\n");
+            return -1;
+        }
+        in_data[0] = '\0';
+        if (lspec.in_path[0] && read_file_into(lspec.in_path, in_data, sizeof(in_data)) != 0) {
+            fprintf(stderr, "redirect failed\n");
+            return -1;
+        }
+        rc = capture_simple_io(trim_ws(lspec.cmd), in_data, out_data, sizeof(out_data), err_data, sizeof(err_data));
+        if (lspec.out_path[0]) {
+            if (write_text_to_file(lspec.out_path, out_data, lspec.out_append) != 0) {
+                fprintf(stderr, "redirect failed\n");
+                return -1;
+            }
+        } else {
+            write(fileno(stdout), out_data, (uint32_t)strlen(out_data));
+        }
+        if (lspec.err_path[0]) {
+            (void)write_text_to_file(lspec.err_path, err_data, lspec.err_append);
+        } else if (err_data[0]) {
+            fprintf(stderr, "%s", err_data);
+        }
+        return rc;
+    }
+
+    return exec_single(seg);
+}
+
 static int exec_line(char *line) {
     uint32_t i = 0;
     uint32_t start = 0;
@@ -704,7 +1052,7 @@ static int exec_line(char *line) {
             char *seg;
             line[i] = '\0';
             seg = trim_ws(line + start);
-            if (seg[0]) (void)exec_single(seg);
+            if (seg[0]) (void)exec_with_redir_or_pipe(seg);
             line[i] = save;
             if (c == '\0') break;
             start = i + 1;
