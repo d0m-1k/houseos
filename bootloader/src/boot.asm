@@ -1,6 +1,25 @@
 org 0x7E00
 bits 16
 
+CFG_MAGIC               equ 0x47464348 ; "HCFG"
+CFG_KERNEL_SIZE         equ 8
+CFG_KERNEL_LBA          equ 12
+CFG_KERNEL_ADDR         equ 16
+CFG_INITRAMFS_SIZE      equ 20
+CFG_INITRAMFS_LBA       equ 24
+CFG_INITRAMFS_ADDR      equ 28
+CFG_MEMMAP_ADDR         equ 32
+CFG_VESA_MODE           equ 36
+CFG_VESA_INFO_ADDR      equ 40
+CFG_VESA_MODE_INFO_ADDR equ 44
+CFG_STAGE2_LBA          equ 48
+CFG_STAGE2_SECTORS      equ 52
+CFG_FLAGS               equ 56
+CFG_ROOTFS_LBA          equ 60
+CFG_ROOTFS_SIZE         equ 64
+
+CFG_FLAG_DEBUG          equ 1
+
 _start:
     cli
     xor ax, ax
@@ -18,86 +37,84 @@ _start:
     cmp bx, 0xAA55
     jne .lba_error
 
-    ; initramfs: 4 x 32 sectors (LBA 6..133) -> 0x8000..0x8FFF
-    mov dword [dap_start_lba], 6
-    mov word [dap_segment], 0x8000
-    mov word [dap_sectors], 32
+    ; read boot config sector (LBA 1) to 0000:0600
+    mov word [dap_sectors], 1
+    mov word [dap_offset], 0x0600
+    mov word [dap_segment], 0x0000
+    mov dword [dap_start_lba], 1
+    mov dword [dap_start_lba+4], 0
     call read_lba
+    jc .cfg_error
+
+    mov eax, [cfg_base + 0]
+    cmp eax, CFG_MAGIC
+    jne .cfg_error
+
+    test dword [cfg_base + CFG_FLAGS], CFG_FLAG_DEBUG
+    jz .no_dbg
+    mov byte [debug_enabled], 1
+.no_dbg:
+
+    mov eax, [cfg_base + CFG_MEMMAP_ADDR]
+    mov [memmap_addr], eax
+    call linear_to_seg_off
+    mov [memmap_off], ax
+    mov [memmap_seg], dx
+
+    mov eax, [cfg_base + CFG_VESA_INFO_ADDR]
+    mov [vesa_info_addr], eax
+    call linear_to_seg_off
+    mov [vesa_info_off], ax
+    mov [vesa_info_seg], dx
+
+    mov eax, [cfg_base + CFG_VESA_MODE_INFO_ADDR]
+    mov [vesa_mode_info_addr], eax
+    call linear_to_seg_off
+    mov [vesa_mode_info_off], ax
+    mov [vesa_mode_info_seg], dx
+
+    mov ax, [cfg_base + CFG_VESA_MODE]
+    mov [vesa_mode_value], ax
+
+    mov eax, [cfg_base + CFG_KERNEL_ADDR]
+    mov [pm_entry_addr], eax
+
+    mov si, msg_load_kernel
+    call dbg_print
+    mov eax, [cfg_base + CFG_KERNEL_LBA]
+    mov ebx, [cfg_base + CFG_KERNEL_ADDR]
+    mov ecx, [cfg_base + CFG_KERNEL_SIZE]
+    call load_blob
+    jc .disk_kernel_error
+
+    mov si, msg_load_initramfs
+    call dbg_print
+    mov eax, [cfg_base + CFG_INITRAMFS_LBA]
+    mov ebx, [cfg_base + CFG_INITRAMFS_ADDR]
+    mov ecx, [cfg_base + CFG_INITRAMFS_SIZE]
+    call load_blob
     jc .disk_initramfs_error
 
-    mov dword [dap_start_lba], 38
-    mov word [dap_segment], 0x8400
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_initramfs_error
-
-    mov dword [dap_start_lba], 70
-    mov word [dap_segment], 0x8800
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_initramfs_error
-
-    mov dword [dap_start_lba], 102
-    mov word [dap_segment], 0x8C00
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_initramfs_error
-
-    ; kernel: 8 x 32 sectors (LBA 134..389) -> 0x1000..0x2FFF
-    mov dword [dap_start_lba], 134
-    mov word [dap_segment], 0x1000
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_kernel_error
-
-    mov dword [dap_start_lba], 166
-    mov word [dap_segment], 0x1400
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_kernel_error
-
-    mov dword [dap_start_lba], 198
-    mov word [dap_segment], 0x1800
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_kernel_error
-
-    mov dword [dap_start_lba], 230
-    mov word [dap_segment], 0x1C00
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_kernel_error
-
-    mov dword [dap_start_lba], 262
-    mov word [dap_segment], 0x2000
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_kernel_error
-
-    mov dword [dap_start_lba], 294
-    mov word [dap_segment], 0x2400
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_kernel_error
-
-    mov dword [dap_start_lba], 326
-    mov word [dap_segment], 0x2800
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_kernel_error
-
-    mov dword [dap_start_lba], 358
-    mov word [dap_segment], 0x2C00
-    mov word [dap_sectors], 32
-    call read_lba
-    jc .disk_kernel_error
-
-    
+    mov si, msg_memmap
+    call dbg_print
     call get_memory_map
+
+    mov si, msg_vesa
+    call dbg_print
     call vesa_load
+
+    mov si, msg_a20
+    call dbg_print
     call enable_a20
-    
+
+    mov si, msg_pm
+    call dbg_print
     call switch_to_pm
+    jmp .halt
+
+.cfg_error:
+    mov si, cfg_err_msg
+    call print
     jmp .halt
 
 .lba_error:
@@ -119,15 +136,77 @@ _start:
     call print_hex_byte
     jmp .halt
 
-.kernel_corrupt:
-    mov si, kernel_corrupt_msg
-    call print
-    jmp .halt
-
 .halt:
     cli
     hlt
     jmp .halt
+
+; in: EAX=lba, EBX=linear addr, ECX=size in bytes
+load_blob:
+    pushad
+    mov [load_lba], eax
+    mov [load_addr], ebx
+    mov eax, ecx
+    add eax, 511
+    shr eax, 9
+    mov [load_sectors_left], eax
+
+.loop:
+    mov eax, [load_sectors_left]
+    test eax, eax
+    jz .done
+    cmp eax, 8
+    jbe .chunk_ok
+    mov eax, 8
+.chunk_ok:
+    mov [load_chunk], ax
+    mov word [dap_sectors], ax
+
+    mov eax, [load_addr]
+    call linear_to_seg_off
+    mov [dap_offset], ax
+    mov [dap_segment], dx
+
+    mov eax, [load_lba]
+    mov [dap_start_lba], eax
+    mov dword [dap_start_lba+4], 0
+
+    call read_lba
+    jc .error
+
+    movzx eax, word [load_chunk]
+    mov edx, eax
+    shl eax, 9
+    add [load_addr], eax
+
+    mov eax, [load_lba]
+    add eax, edx
+    mov [load_lba], eax
+
+    mov eax, [load_sectors_left]
+    sub eax, edx
+    mov [load_sectors_left], eax
+    jmp .loop
+
+.done:
+    popad
+    clc
+    ret
+.error:
+    popad
+    stc
+    ret
+
+; in EAX linear address (<1MB), out AX=offset, DX=segment
+linear_to_seg_off:
+    push bx
+    mov ebx, eax
+    and bx, 0x000F
+    mov ax, bx
+    shr eax, 4
+    mov dx, ax
+    pop bx
+    ret
 
 read_lba:
     pusha
@@ -143,6 +222,13 @@ read_lba:
     stc
     ret
 
+dbg_print:
+    cmp byte [debug_enabled], 0
+    je .done
+    call print
+.done:
+    ret
+
 %include "print.asm"
 %include "gdt.asm"
 %include "memory.asm"
@@ -150,23 +236,56 @@ read_lba:
 %include "a20.asm"
 %include "modes.asm"
 
+cfg_base             equ 0x0600
+
 dap:
     db 0x10
     db 0x00
 dap_sectors:
-    dw 0x0000
+    dw 0
 dap_offset:
-    dw 0x0000
+    dw 0
 dap_segment:
-    dw 0x0000
+    dw 0
 dap_start_lba:
-    dd 0x00000000
-    dd 0x00000000
+    dd 0
+    dd 0
 
-boot_drive: db 0x00
+boot_drive:          db 0
+debug_enabled:       db 0
 
-lba_err_msg: db "LBA not supported!", 0x0D, 0x0A, 0
-disk_initramfs_err_msg: db "InitRamFS read error! Code: ", 0
-disk_kernel_err_msg: db "Kernel read error! Code: ", 0
-initramfs_corrupt_msg: db "InitRamFS corrupted!", 0x0D, 0x0A, 0
-kernel_corrupt_msg: db "Kernel corrupted!", 0x0D, 0x0A, 0
+memmap_addr:         dd 0x5000
+memmap_seg:          dw 0
+memmap_off:          dw 0
+
+vesa_mode_value:     dw 0x118
+vesa_info_addr:      dd 0x9000
+vesa_mode_info_addr: dd 0x9100
+vesa_info_seg:       dw 0
+vesa_info_off:       dw 0
+vesa_mode_info_seg:  dw 0
+vesa_mode_info_off:  dw 0
+
+load_lba:            dd 0
+load_addr:           dd 0
+load_sectors_left:   dd 0
+load_chunk:          dw 0
+
+pm_entry_addr:       dd 0x10000
+
+lba_err_msg:               db "LBA not supported!", 0x0D, 0x0A, 0
+cfg_err_msg:               db "Boot config read error", 0x0D, 0x0A, 0
+disk_initramfs_err_msg:    db "InitRamFS read error! Code: ", 0
+disk_kernel_err_msg:       db "Kernel read error! Code: ", 0
+
+msg_load_kernel:           db "ST2: load kernel", 0x0D, 0x0A, 0
+msg_load_initramfs:        db "ST2: load initramfs", 0x0D, 0x0A, 0
+msg_memmap:                db "ST2: memorymap", 0x0D, 0x0A, 0
+msg_vesa:                  db "ST2: vesa", 0x0D, 0x0A, 0
+msg_a20:                   db "ST2: a20", 0x0D, 0x0A, 0
+msg_pm:                    db "ST2: pm", 0x0D, 0x0A, 0
+
+; Keep VESA temporary buffers at the very end of stage2 data,
+; so they don't land in the middle of executable code.
+vesa_info_buffer:          times 512 db 0
+mode_info_buffer:          times 256 db 0

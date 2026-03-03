@@ -7,6 +7,7 @@ get_memory_map:
     xor ax, ax
     mov es, ax
     mov di, 0x5000
+    mov bp, 128
     
     xor ebx, ebx
     mov eax, 0xE820
@@ -21,6 +22,8 @@ get_memory_map:
     
 .next_entry:
     test ebx, ebx
+    jz .done
+    dec bp
     jz .done
     
     mov eax, 0xE820

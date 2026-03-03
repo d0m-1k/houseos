@@ -24,7 +24,7 @@ vesa_load:
     mov ax, 0
     mov es, ax
     mov ax, 0x4F01
-    mov cx, 0x118
+    mov cx, [vesa_mode_value]
     mov di, mode_info_buffer
     int 0x10
     pop es
@@ -32,7 +32,8 @@ vesa_load:
     jne .mode_error
 
     mov ax, 0x4F02
-    mov bx, 0x4118
+    mov bx, [vesa_mode_value]
+    or bx, 0x4000
     int 0x10
     cmp ax, 0x004F
     jne .switch_error
@@ -67,6 +68,3 @@ vesa_load:
 vesa_err_msg: db "VESA error!", 0
 mode_err_msg: db "Mode error!", 0
 switch_err_msg: db "Switch error!", 0
-
-vesa_info_buffer: times 512 db 0
-mode_info_buffer: times 256 db 0

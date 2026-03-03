@@ -1,0 +1,79 @@
+bits 16
+
+%ifndef CFG_MAGIC
+%define CFG_MAGIC 0x47464348 ; "HCFG"
+%endif
+%ifndef CFG_VERSION
+%define CFG_VERSION 1
+%endif
+%ifndef CFG_KERNEL_SIZE
+%define CFG_KERNEL_SIZE 0
+%endif
+%ifndef CFG_KERNEL_LBA
+%define CFG_KERNEL_LBA 0
+%endif
+%ifndef CFG_KERNEL_ADDR
+%define CFG_KERNEL_ADDR 0x00010000
+%endif
+%ifndef CFG_INITRAMFS_SIZE
+%define CFG_INITRAMFS_SIZE 0
+%endif
+%ifndef CFG_INITRAMFS_LBA
+%define CFG_INITRAMFS_LBA 0
+%endif
+%ifndef CFG_INITRAMFS_ADDR
+%define CFG_INITRAMFS_ADDR 0x00080000
+%endif
+%ifndef CFG_MEMMAP_ADDR
+%define CFG_MEMMAP_ADDR 0x00005000
+%endif
+%ifndef CFG_VESA_MODE
+%define CFG_VESA_MODE 0x0118
+%endif
+%ifndef CFG_VESA_INFO_ADDR
+%define CFG_VESA_INFO_ADDR 0x00009000
+%endif
+%ifndef CFG_VESA_MODE_INFO_ADDR
+%define CFG_VESA_MODE_INFO_ADDR 0x00009100
+%endif
+%ifndef CFG_STAGE2_LBA
+%define CFG_STAGE2_LBA 2
+%endif
+%ifndef CFG_STAGE2_SECTORS
+%define CFG_STAGE2_SECTORS 4
+%endif
+%ifndef CFG_FLAGS
+%define CFG_FLAGS 0
+%endif
+%ifndef CFG_ROOTFS_LBA
+%define CFG_ROOTFS_LBA 0
+%endif
+%ifndef CFG_ROOTFS_SIZE
+%define CFG_ROOTFS_SIZE 0
+%endif
+
+dd CFG_MAGIC
+dd CFG_VERSION
+
+dd CFG_KERNEL_SIZE
+dd CFG_KERNEL_LBA
+dd CFG_KERNEL_ADDR
+
+dd CFG_INITRAMFS_SIZE
+dd CFG_INITRAMFS_LBA
+dd CFG_INITRAMFS_ADDR
+
+dd CFG_MEMMAP_ADDR
+dw CFG_VESA_MODE
+dw 0
+dd CFG_VESA_INFO_ADDR
+dd CFG_VESA_MODE_INFO_ADDR
+
+dd CFG_STAGE2_LBA
+dd CFG_STAGE2_SECTORS
+dd CFG_FLAGS
+
+dd CFG_ROOTFS_LBA
+dd CFG_ROOTFS_SIZE
+
+times 512-($-$$) db 0

@@ -13,9 +13,8 @@ _start:
     mov ah, 0x02
     mov al, 4
     mov ch, 0x00
-    mov cl, 2
+    mov cl, 3
     mov dh, 0x00
-    mov dl, 0x80
     mov bx, 0x0000
     mov es, bx
     mov bx, 0x7E00
@@ -38,12 +37,7 @@ disk_err_msg db "MBR: Disk read error!", 0x0D, 0x0A, 0
 times 446-($-$$) db 0
 
 partion1:
-    db 0x80
-    db 0, 0, 0
-    db 0x30
-    db 0, 0, 0
-    dd 1
-    dd 32
+    times 16 db 0
 
 partion2: times 16 db 0
 partion3: times 16 db 0

@@ -21,4 +21,5 @@ init_pm:
     mov ebp, 0x90000
     mov esp, ebp
     
-    jmp CODE_SEG:0x10000
+    mov eax, [pm_entry_addr]
+    jmp eax
