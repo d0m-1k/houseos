@@ -40,6 +40,23 @@ static inline void irq_restore(uint32_t flags) {
     else cli();
 }
 
+static void task_release_resources(task_t *task) {
+    if (!task) return;
+    if (task->cr3 && task->cr3 != mm_kernel_cr3()) {
+        mm_user_cr3_destroy(task->cr3);
+    }
+    if (task->user_slot != (uint32_t)-1) {
+        mm_user_slot_free(task->user_slot);
+    }
+    if (task->stack) {
+        kfree(task->stack);
+    }
+    task->stack = NULL;
+    task->cr3 = mm_kernel_cr3();
+    task->user_slot = (uint32_t)-1;
+    task->user_phys_base = 0;
+}
+
 void task_init(void (*main_task)(void)) {
     uint8_t *idle_stack = (uint8_t*)kmalloc(STACK_SIZE);
     uint32_t *idle_top = (uint32_t*)(idle_stack + STACK_SIZE);
@@ -51,6 +68,7 @@ void task_init(void (*main_task)(void)) {
 
     task_t *idle = &tasks[task_count++];
     idle->pid = next_pid++;
+    idle->ppid = 0;
     idle->state = TASK_READY;
     idle->cr3 = mm_kernel_cr3();
     idle->user_slot = (uint32_t)-1;
@@ -70,6 +88,7 @@ void task_init(void (*main_task)(void)) {
 
     task_t *init_task = &tasks[task_count++];
     init_task->pid = next_pid++;
+    init_task->ppid = 0;
     init_task->state = TASK_RUNNING;
     init_task->cr3 = mm_kernel_cr3();
     init_task->user_slot = (uint32_t)-1;
@@ -113,12 +132,7 @@ int task_create(void (*entry)(void*), void *arg) {
     irq_flags = irq_save();
     for (int i = 0; i < task_count; i++) {
         if (tasks[i].state == TASK_TERMINATED) {
-            if (tasks[i].cr3 && tasks[i].cr3 != mm_kernel_cr3()) {
-                mm_user_cr3_destroy(tasks[i].cr3);
-            }
-            if (tasks[i].user_slot != (uint32_t)-1) {
-                mm_user_slot_free(tasks[i].user_slot);
-            }
+            task_release_resources(&tasks[i]);
             slot = i;
             break;
         }
@@ -145,6 +159,7 @@ int task_create(void (*entry)(void*), void *arg) {
     }
 
     task->pid = next_pid++;
+    task->ppid = current_task ? current_task->pid : 0;
     task->state = TASK_READY;
     task->cr3 = mm_kernel_cr3();
     task->user_slot = (uint32_t)-1;
@@ -170,8 +185,6 @@ void task_yield(void) {
 }
 
 void task_exit(void) {
-    current_task->exit_status = 0;
-    current_task->term_signal = 0;
     current_task->state = TASK_TERMINATED;
     /* Cannot free the current kernel stack before switching away from it. */
     schedule();
@@ -246,4 +259,38 @@ int task_terminate_by_pid(uint32_t pid, int32_t exit_status, uint32_t term_signa
     task->term_signal = term_signal;
     task->state = TASK_TERMINATED;
     return 0;
+}
+
+int task_waitpid(int32_t pid, int32_t *status_out, uint32_t options) {
+    int has_child = 0;
+    if (!current_task) return -1;
+    for (;;) {
+        has_child = 0;
+        for (int i = 0; i < task_count; i++) {
+            task_t *t = &tasks[i];
+            if (t == _idle_task) continue;
+            if (t->pid == 0) continue;
+            if (t->ppid != current_task->pid) continue;
+            if (pid > 0 && (uint32_t)pid != t->pid) continue;
+            has_child = 1;
+            if (t->state == TASK_TERMINATED) {
+                int32_t st = t->exit_status;
+                uint32_t ret_pid = t->pid;
+                task_release_resources(t);
+                t->pid = 0;
+                t->ppid = 0;
+                t->state = TASK_TERMINATED;
+                t->exit_status = 0;
+                t->term_signal = 0;
+                t->tty_path[0] = '\0';
+                t->prog_path[0] = '\0';
+                t->cmdline[0] = '\0';
+                if (status_out) *status_out = st;
+                return (int)ret_pid;
+            }
+        }
+        if (!has_child) return -1;
+        if (options & 1u) return 0;
+        task_yield();
+    }
 }

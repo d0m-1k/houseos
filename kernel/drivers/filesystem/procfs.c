@@ -158,8 +158,12 @@ static int proc_parse_path(const char *path, proc_path_t *out) {
     }
     if (*p != '/') return -1;
     p++;
+    if (*p == '\0') {
+        out->kind = PROC_NODE_PID_DIR;
+        return 0;
+    }
 
-    if (strcmp(p, "fd") == 0) {
+    if (strcmp(p, "fd") == 0 || strcmp(p, "fd/") == 0) {
         out->kind = PROC_NODE_PID_FD_DIR;
         return 0;
     }

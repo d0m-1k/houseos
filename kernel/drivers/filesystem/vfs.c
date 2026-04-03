@@ -5,6 +5,10 @@ static int is_valid_abs_path(const char *path) {
     return (path && path[0] == '/');
 }
 
+static int is_root_path(const char *path) {
+    return (path && path[0] == '/' && path[1] == '\0');
+}
+
 static int normalize_mount_path(const char *in, char *out, uint32_t cap) {
     size_t n;
     if (!in || !out || cap < 2) return -1;
@@ -208,6 +212,15 @@ int vfs_umount(vfs_t *vfs, const char *mount_path) {
         }
     }
     if (idx >= vfs->mount_count) return -1;
+    for (uint32_t i = 0; i < vfs->mount_count; i++) {
+        size_t nlen;
+        if (i == idx) continue;
+        nlen = strlen(norm);
+        if (strncmp(vfs->mounts[i].mount_path, norm, nlen) == 0 &&
+            vfs->mounts[i].mount_path[nlen] == '/') {
+            return -1;
+        }
+    }
     for (uint32_t i = idx + 1; i < vfs->mount_count; i++) {
         vfs->mounts[i - 1] = vfs->mounts[i];
     }
@@ -306,15 +319,34 @@ int vfs_link(vfs_t *vfs, const char *oldpath, const char *newpath) {
 
 int vfs_unlink(vfs_t *vfs, const char *path) {
     vfs_resolved_t r;
+    vfs_info_t info;
     if (is_exact_mount_path(vfs, path)) return -1;
+    if (is_root_path(path)) return -1;
     if (vfs_resolve(vfs, path, &r) != 0 || !r.ops || !r.ops->unlink) return -1;
+    if (!r.ops->get_info) return -1;
+    if (r.ops->get_info(r.fs_ctx, r.local_path, &info) != 0) return -1;
+    if (info.type == VFS_NODE_DIR) return -1;
     return r.ops->unlink(r.fs_ctx, r.local_path);
 }
 
 int vfs_rmdir(vfs_t *vfs, const char *path) {
     vfs_resolved_t r;
+    vfs_info_t info;
+    char norm[256];
     if (is_exact_mount_path(vfs, path)) return -1;
+    if (is_root_path(path)) return -1;
+    if (normalize_mount_path(path, norm, sizeof(norm)) != 0) return -1;
+    for (uint32_t i = 0; i < vfs->mount_count; i++) {
+        size_t nlen = strlen(norm);
+        if (strncmp(vfs->mounts[i].mount_path, norm, nlen) == 0 &&
+            vfs->mounts[i].mount_path[nlen] == '/') {
+            return -1;
+        }
+    }
     if (vfs_resolve(vfs, path, &r) != 0 || !r.ops || !r.ops->rmdir) return -1;
+    if (!r.ops->get_info) return -1;
+    if (r.ops->get_info(r.fs_ctx, r.local_path, &info) != 0) return -1;
+    if (info.type != VFS_NODE_DIR) return -1;
     return r.ops->rmdir(r.fs_ctx, r.local_path);
 }
 

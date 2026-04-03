@@ -56,6 +56,25 @@ make -B
 make run
 ```
 
+Настройка размера для BIOS/stage2 preload:
+
+```bash
+make APPLET_PROFILE=core
+make APPLET_PROFILE=full
+```
+
+## Статус Unix-like Совместимости
+
+- procfs: `/proc/version` отдаёт строку версии ОС.
+- procfs: поддерживается alias `/proc/self/*`.
+- procfs: директории pid/fd принимают завершающий `/` (`/proc/<pid>/`, `/proc/<pid>/fd/`).
+- userspace: `cmd` работает как multi-call бинарник (`argv[0]` dispatch).
+- userspace: `cmd install` определяет свой путь через `/proc/self/exe` с fallback.
+- shell: цикл ожидания завершается для завершённого или отсутствующего child.
+
+Быстрая проверка контрактов:
+Используйте `make` и запуск QEMU с serial как smoke-проверку совместимости.
+
 ## Прямой UDP Netlog Из Ядра (Realtek)
 
 В HouseOS добавлен минимальный UDP-логгер в ядре (только TX).

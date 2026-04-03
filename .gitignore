@@ -1,25 +1,16 @@
-# IDE/editor
 .idea/
-
-# Build artifacts
 build/
 bootloader/build/
 kernel/build/
 programs/build/
 programs/*/build/
-
-# Generated initramfs payload
 initramfs/initramfs.bin
 initramfs/data/bin/*
 !initramfs/data/bin/.gitkeep
-
-# Binary outputs
 *.elf
 *.bin
 *.img
 *.a
 *.o
-
-# Temp/log files
 *.log
 *.tmp

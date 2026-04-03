@@ -21,6 +21,8 @@ CFG_ROOTFS_SIZE         equ 64
 CFG_FLAG_DEBUG          equ 1
 
 _start:
+    jmp 0x0000:.cs0
+.cs0:
     cli
     xor ax, ax
     mov ds, ax
@@ -79,6 +81,10 @@ _start:
 
     mov dword [pm_entry_addr], 0x00010000
 
+    mov si, msg_a20
+    call dbg_print
+    call enable_a20
+
     mov si, msg_load_kernel
     call dbg_print
     mov eax, [cfg_base + CFG_KERNEL_LBA]
@@ -102,10 +108,6 @@ _start:
     mov si, msg_vesa
     call dbg_print
     call vesa_load
-
-    mov si, msg_a20
-    call dbg_print
-    call enable_a20
 
     mov si, msg_pm
     call dbg_print

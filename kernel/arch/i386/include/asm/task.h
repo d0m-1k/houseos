@@ -15,6 +15,7 @@ typedef struct task {
     uint32_t esp;
     uint32_t esp0;
     uint32_t pid;
+    uint32_t ppid;
     uint32_t cr3;
     uint32_t user_slot;
     uint32_t user_phys_base;
@@ -37,6 +38,7 @@ void schedule(void);
 int task_state_by_pid(uint32_t pid);
 task_t *task_find_by_pid(uint32_t pid);
 int task_terminate_by_pid(uint32_t pid, int32_t exit_status, uint32_t term_signal);
+int task_waitpid(int32_t pid, int32_t *status_out, uint32_t options);
 
 extern task_t *current_task;
 extern task_t *_idle_task;

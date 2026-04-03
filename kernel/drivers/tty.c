@@ -1032,7 +1032,9 @@ static int tty_vesa_ioctl(void *ctx, uint32_t request, void *arg) {
         return 0;
     }
     if (request == DEV_IOCTL_TTY_SET_FG_PID) {
-        tty->fg_pid = arg ? *(int32_t*)arg : -1;
+        int32_t pid = arg ? *(int32_t*)arg : -1;
+        if (pid > 0 && !task_find_by_pid((uint32_t)pid)) return -1;
+        tty->fg_pid = pid;
         return 0;
     }
     if (request == DEV_IOCTL_TTY_GET_FG_PID) {
@@ -1291,7 +1293,9 @@ static int tty_serial_ioctl(void *ctx, uint32_t request, void *arg) {
         return 0;
     }
     if (request == DEV_IOCTL_TTY_SET_FG_PID) {
-        tty->fg_pid = arg ? *(int32_t*)arg : -1;
+        int32_t pid = arg ? *(int32_t*)arg : -1;
+        if (pid > 0 && !task_find_by_pid((uint32_t)pid)) return -1;
+        tty->fg_pid = pid;
         return 0;
     }
     if (request == DEV_IOCTL_TTY_GET_FG_PID) {

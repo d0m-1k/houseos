@@ -10,6 +10,7 @@
 #include <drivers/elf_loader.h>
 #include <drivers/tty.h>
 #include <drivers/serial.h>
+#include <kerrno.h>
 #include <string.h>
 
 enum {
@@ -45,6 +46,7 @@ enum {
     SYS_RECVFROM = 29,
     SYS_SETSOCKOPT = 30,
     SYS_TASK_KILL = 31,
+    SYS_WAITPID = 32,
 };
 
 vfs_t *g_root_fs_for_syscalls = NULL;
@@ -102,6 +104,10 @@ typedef struct {
 #define AF_INET 2u
 #define SOCK_DGRAM 2u
 #define IPPROTO_UDP 17u
+#define SOL_SOCKET 1u
+#define SO_RCVTIMEO 20u
+#define SO_SNDTIMEO 21u
+#define MSG_DONTWAIT 0x40u
 #define INADDR_ANY 0x00000000u
 #define INADDR_LOOPBACK 0x7F000001u
 #define UDP_MAX_SOCKETS 8u
@@ -214,14 +220,14 @@ static void udp_socket_free(int sid) {
 static int udp_bind_socket(int sid, const syscall_sockaddr_in_t *ua, uint32_t addrlen) {
     uint32_t addr;
     uint16_t port;
-    if (sid < 0 || sid >= (int)UDP_MAX_SOCKETS || !ua) return -1;
-    if (addrlen < sizeof(syscall_sockaddr_in_t)) return -1;
-    if (ua->sin_family != AF_INET) return -1;
+    if (sid < 0 || sid >= (int)UDP_MAX_SOCKETS || !ua) return -K_EINVAL;
+    if (addrlen < sizeof(syscall_sockaddr_in_t)) return -K_EINVAL;
+    if (ua->sin_family != AF_INET) return -K_EINVAL;
     port = be16_to_cpu(ua->sin_port);
     addr = be32_to_cpu(ua->sin_addr);
-    if (port == 0) return -1;
-    if (addr != INADDR_ANY && addr != INADDR_LOOPBACK) return -1;
-    if (udp_port_in_use(addr, port, sid)) return -1;
+    if (port == 0) return -K_EINVAL;
+    if (addr != INADDR_ANY && addr != INADDR_LOOPBACK) return -K_EINVAL;
+    if (udp_port_in_use(addr, port, sid)) return -K_EBUSY;
     g_udp_sockets[sid].bound = 1;
     g_udp_sockets[sid].bind_addr = addr;
     g_udp_sockets[sid].bind_port = port;
@@ -236,23 +242,23 @@ static int udp_sendto_socket(int sid, const syscall_udp_send_req_t *req) {
     udp_socket_t *dst;
     udp_datagram_t *pkt;
 
-    if (sid < 0 || sid >= (int)UDP_MAX_SOCKETS || !req || !req->buf || !req->addr) return -1;
-    if (req->addrlen < sizeof(syscall_sockaddr_in_t)) return -1;
-    if (req->len > UDP_PAYLOAD_MAX) return -1;
-    if (req->addr->sin_family != AF_INET) return -1;
+    if (sid < 0 || sid >= (int)UDP_MAX_SOCKETS || !req || !req->buf || !req->addr) return -K_EINVAL;
+    if (req->addrlen < sizeof(syscall_sockaddr_in_t)) return -K_EINVAL;
+    if (req->len > UDP_PAYLOAD_MAX) return -K_EINVAL;
+    if (req->addr->sin_family != AF_INET) return -K_EINVAL;
 
     dst_addr = be32_to_cpu(req->addr->sin_addr);
     dst_port = be16_to_cpu(req->addr->sin_port);
-    if (dst_port == 0) return -1;
-    if (dst_addr != INADDR_LOOPBACK && dst_addr != INADDR_ANY) return -1;
+    if (dst_port == 0) return -K_EINVAL;
+    if (dst_addr != INADDR_LOOPBACK && dst_addr != INADDR_ANY) return -K_EINVAL;
 
     src = &g_udp_sockets[sid];
-    if (!src->bound && udp_autobind(sid) != 0) return -1;
+    if (!src->bound && udp_autobind(sid) != 0) return -K_EAGAIN;
 
     dst_sid = udp_find_bound((dst_addr == INADDR_ANY) ? INADDR_LOOPBACK : dst_addr, dst_port);
-    if (dst_sid < 0) return -1;
+    if (dst_sid < 0) return -K_ENOENT;
     dst = &g_udp_sockets[dst_sid];
-    if (dst->q_len >= UDP_QUEUE_MAX) return -1;
+    if (dst->q_len >= UDP_QUEUE_MAX) return -K_EAGAIN;
 
     pkt = &dst->q[dst->q_tail];
     memset(pkt, 0, sizeof(*pkt));
@@ -271,13 +277,19 @@ static int udp_recvfrom_socket(int sid, syscall_udp_recv_req_t *req) {
     udp_socket_t *s;
     udp_datagram_t *pkt;
     uint32_t to_copy;
+    uint32_t waited = 0;
 
-    if (sid < 0 || sid >= (int)UDP_MAX_SOCKETS || !req || !req->buf) return -1;
+    if (sid < 0 || sid >= (int)UDP_MAX_SOCKETS || !req || !req->buf) return -K_EINVAL;
     s = &g_udp_sockets[sid];
-    if (s->q_len == 0) return -1;
+    while (s->q_len == 0) {
+        if (req->flags & MSG_DONTWAIT) return -K_EAGAIN;
+        if (s->rcv_timeout_ms > 0 && waited >= s->rcv_timeout_ms) return -K_ETIMEDOUT;
+        sleep(10);
+        waited += 10;
+    }
 
     pkt = &s->q[s->q_head];
-    if (!pkt->used) return -1;
+    if (!pkt->used) return -K_EIO;
 
     to_copy = (req->len < pkt->len) ? req->len : pkt->len;
     if (to_copy) memcpy(req->buf, pkt->payload, to_copy);
@@ -646,36 +658,48 @@ uint32_t do_syscall_impl(
             sleep(ebx);
             return 0;
         case SYS_GET_TICKS:
-            return 0;
+            return timer_get_ticks();
         case SYS_EXIT:
+            if (current_task) {
+                current_task->exit_status = (int32_t)ebx;
+                current_task->term_signal = 0;
+            }
             task_exit();
             return 0;
         case SYS_READ: {
             const char *path;
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
             if (!ecx || edx == 0) return 0;
             path = fd_path(ebx);
-            if (!path) return (uint32_t)-1;
-            return (uint32_t)vfs_read(g_root_fs_for_syscalls, path, (void*)ecx, edx);
+            if (!path) return (uint32_t)(-K_EBADF);
+            {
+                ssize_t n = vfs_read(g_root_fs_for_syscalls, path, (void*)ecx, edx);
+                if (n < 0) return (uint32_t)(-K_EIO);
+                return (uint32_t)n;
+            }
         }
         case SYS_WRITE: {
             const char *path;
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
             if (!ecx || edx == 0) return 0;
             path = fd_path(ebx);
-            if (!path) return (uint32_t)-1;
-            return (uint32_t)vfs_write(g_root_fs_for_syscalls, path, (const void*)ecx, edx);
+            if (!path) return (uint32_t)(-K_EBADF);
+            {
+                ssize_t n = vfs_write(g_root_fs_for_syscalls, path, (const void*)ecx, edx);
+                if (n < 0) return (uint32_t)(-K_EIO);
+                return (uint32_t)n;
+            }
         }
         case SYS_EXEC: {
             char path[256];
             uint32_t entry = 0;
             uint32_t user_esp = USER_STACK_TOP;
 
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)-1;
-            if (ensure_current_task_user_space() != 0) return (uint32_t)-1;
-            if (elf_load_from_vfs(g_root_fs_for_syscalls, path, &entry) != 0) return (uint32_t)-1;
-            if (build_user_stack_from_cmdline(NULL, &user_esp) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
+            if (ensure_current_task_user_space() != 0) return (uint32_t)(-K_ENOMEM);
+            if (elf_load_from_vfs(g_root_fs_for_syscalls, path, &entry) != 0) return (uint32_t)(-K_ENOENT);
+            if (build_user_stack_from_cmdline(NULL, &user_esp) != 0) return (uint32_t)(-K_EINVAL);
 
             f->ip = entry;
             f->sp = user_esp;
@@ -687,12 +711,12 @@ uint32_t do_syscall_impl(
             uint32_t entry = 0;
             uint32_t user_esp = USER_STACK_TOP;
 
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)-1;
-            if (copy_user_string((const char*)ecx, cmdline, sizeof(cmdline)) != 0) return (uint32_t)-1;
-            if (ensure_current_task_user_space() != 0) return (uint32_t)-1;
-            if (elf_load_from_vfs(g_root_fs_for_syscalls, path, &entry) != 0) return (uint32_t)-1;
-            if (build_user_stack_from_cmdline(cmdline, &user_esp) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
+            if (copy_user_string((const char*)ecx, cmdline, sizeof(cmdline)) != 0) return (uint32_t)(-K_EINVAL);
+            if (ensure_current_task_user_space() != 0) return (uint32_t)(-K_ENOMEM);
+            if (elf_load_from_vfs(g_root_fs_for_syscalls, path, &entry) != 0) return (uint32_t)(-K_ENOENT);
+            if (build_user_stack_from_cmdline(cmdline, &user_esp) != 0) return (uint32_t)(-K_EINVAL);
 
             f->ip = entry;
             f->sp = user_esp;
@@ -700,29 +724,33 @@ uint32_t do_syscall_impl(
         }
         case SYS_IOCTL: {
             const char *path;
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
             path = fd_path(ebx);
-            if (!path) return (uint32_t)-1;
+            if (!path) return (uint32_t)(-K_EBADF);
             return (uint32_t)vfs_ioctl(g_root_fs_for_syscalls, path, ecx, (void*)edx);
         }
         case SYS_OPEN: {
             char path[256];
             int inode_fd = -1;
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
             inode_fd = vfs_open(g_root_fs_for_syscalls, path);
             if (inode_fd < 0) {
                 if (ecx & 1U) {
-                    if (vfs_create_file(g_root_fs_for_syscalls, path) != 0) return (uint32_t)-1;
+                    if (vfs_create_file(g_root_fs_for_syscalls, path) != 0) return (uint32_t)(-K_EACCES);
                     inode_fd = vfs_open(g_root_fs_for_syscalls, path);
                 }
-                if (inode_fd < 0) return (uint32_t)-1;
+                if (inode_fd < 0) return (uint32_t)(-K_ENOENT);
             }
-            return (uint32_t)fd_alloc(path);
+            {
+                int fd = fd_alloc(path);
+                if (fd < 0) return (uint32_t)(-K_ENFILE);
+                return (uint32_t)fd;
+            }
         }
         case SYS_CLOSE: {
             fd_entry_t *fds = fd_current();
-            if (ebx >= FD_MAX || !fds[ebx].used) return (uint32_t)-1;
+            if (ebx >= FD_MAX || !fds[ebx].used) return (uint32_t)(-K_EBADF);
             if (fds[ebx].kind == FD_KIND_UDP && fds[ebx].sock_id >= 0) {
                 udp_socket_free((int)fds[ebx].sock_id);
             }
@@ -734,60 +762,66 @@ uint32_t do_syscall_impl(
         }
         case SYS_MKDIR: {
             char path[256];
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
             return (uint32_t)((vfs_mkdir(g_root_fs_for_syscalls, path) == 0) ? 0 : -1);
         }
         case SYS_UNLINK: {
             char path[256];
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
             return (uint32_t)vfs_unlink(g_root_fs_for_syscalls, path);
         }
         case SYS_RMDIR: {
             char path[256];
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
             return (uint32_t)vfs_rmdir(g_root_fs_for_syscalls, path);
         }
         case SYS_MKFIFO: {
             char path[256];
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
             return (uint32_t)((vfs_mkfifo(g_root_fs_for_syscalls, path) == 0) ? 0 : -1);
         }
         case SYS_MKSOCK: {
             char path[256];
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
             return (uint32_t)((vfs_mksock(g_root_fs_for_syscalls, path) == 0) ? 0 : -1);
         }
         case SYS_LIST: {
             char path[256];
             ssize_t n;
-            if (!g_root_fs_for_syscalls || !ecx || edx == 0) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (!ecx || edx == 0) return (uint32_t)(-K_EINVAL);
+            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
             n = vfs_list(g_root_fs_for_syscalls, path, (char*)ecx, (size_t)edx);
-            if (n < 0) return (uint32_t)-1;
+            if (n < 0) return (uint32_t)(-K_EIO);
             return (uint32_t)n;
         }
         case SYS_APPEND: {
             const char *path;
-            if (!g_root_fs_for_syscalls || !ecx || edx == 0) return 0;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (!ecx || edx == 0) return 0;
             path = fd_path(ebx);
-            if (!path) return (uint32_t)-1;
-            return (uint32_t)vfs_append(g_root_fs_for_syscalls, path, (const void*)ecx, edx);
+            if (!path) return (uint32_t)(-K_EBADF);
+            {
+                ssize_t n = vfs_append(g_root_fs_for_syscalls, path, (const void*)ecx, edx);
+                if (n < 0) return (uint32_t)(-K_EIO);
+                return (uint32_t)n;
+            }
         }
         case SYS_SPAWN: {
             int pid;
             char path[256];
             char tty[256];
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
             if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0 ||
                 copy_user_string((const char*)ecx, tty, sizeof(tty)) != 0 ||
-                tty[0] != '/') return (uint32_t)-1;
+                tty[0] != '/') return (uint32_t)(-K_EINVAL);
             pid = spawn_user_program(path, tty);
-            if (pid < 0) return (uint32_t)-1;
+            if (pid < 0) return (uint32_t)(-K_EIO);
             return (uint32_t)pid;
         }
         case SYS_SPAWNV: {
@@ -795,19 +829,26 @@ uint32_t do_syscall_impl(
             char path[256];
             char tty[256];
             char cmdline[512];
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
             if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0 ||
                 copy_user_string((const char*)ecx, tty, sizeof(tty)) != 0 ||
                 copy_user_string((const char*)edx, cmdline, sizeof(cmdline)) != 0 ||
-                tty[0] != '/') return (uint32_t)-1;
+                tty[0] != '/') return (uint32_t)(-K_EINVAL);
             pid = spawn_user_program_ex(path, tty, cmdline);
-            if (pid < 0) return (uint32_t)-1;
+            if (pid < 0) return (uint32_t)(-K_EIO);
             return (uint32_t)pid;
         }
         case SYS_TASK_STATE:
             return (uint32_t)task_state_by_pid(ebx);
         case SYS_TASK_KILL:
             return (uint32_t)((task_terminate_by_pid(ebx, -1, 2u) == 0) ? 0 : -1);
+        case SYS_WAITPID: {
+            int32_t status = 0;
+            int32_t r = task_waitpid((int32_t)ebx, ecx ? &status : NULL, edx);
+            if (r < 0) return (uint32_t)(-K_ECHILD);
+            if (ecx) *(int32_t*)ecx = status;
+            return (uint32_t)r;
+        }
         case SYS_INIT_SPAWN_SHELLS: {
             for (uint32_t i = 0; i < (uint32_t)(sizeof(g_shell_ttys) / sizeof(g_shell_ttys[0])); i++) {
                 if (spawn_user_program("/bin/sh", g_shell_ttys[i]) >= 0) sleep(10);
@@ -820,29 +861,29 @@ uint32_t do_syscall_impl(
             char mount_path[256];
             void *ctx = NULL;
             const char *fs_drv = fs_name;
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_string((const char*)ebx, fs_name, sizeof(fs_name)) != 0) return (uint32_t)-1;
-            if (copy_user_path((const char*)ecx, mount_path, sizeof(mount_path)) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_string((const char*)ebx, fs_name, sizeof(fs_name)) != 0) return (uint32_t)(-K_EINVAL);
+            if (copy_user_path((const char*)ecx, mount_path, sizeof(mount_path)) != 0) return (uint32_t)(-K_EINVAL);
             if (strcmp(fs_name, "devfs") == 0) ctx = g_devfs_ctx;
             else if (strncmp(fs_name, "/dev/disk/", 10) == 0) {
                 char norm[256];
                 uint32_t slot = VFS_MAX_MOUNTS;
-                if (normalize_mount_path_local(mount_path, norm, sizeof(norm)) != 0) return (uint32_t)-1;
+                if (normalize_mount_path_local(mount_path, norm, sizeof(norm)) != 0) return (uint32_t)(-K_EINVAL);
                 for (uint32_t i = 0; i < VFS_MAX_MOUNTS; i++) {
                     if (!g_mount_fat_used[i]) {
                         slot = i;
                         break;
                     }
                 }
-                if (slot >= VFS_MAX_MOUNTS) return (uint32_t)-1;
-                if (fat32_init_devpath(&g_mount_fat_ctx[slot], fs_name) != 0) return (uint32_t)-1;
+                if (slot >= VFS_MAX_MOUNTS) return (uint32_t)(-K_ENFILE);
+                if (fat32_init_devpath(&g_mount_fat_ctx[slot], fs_name) != 0) return (uint32_t)(-K_ENODEV);
                 g_mount_fat_used[slot] = 1;
                 strncpy(g_mount_fat_path[slot], norm, sizeof(g_mount_fat_path[slot]) - 1);
                 g_mount_fat_path[slot][sizeof(g_mount_fat_path[slot]) - 1] = '\0';
                 ctx = &g_mount_fat_ctx[slot];
                 fs_drv = "fat32";
             }
-            if (!ctx) return (uint32_t)-1;
+            if (!ctx) return (uint32_t)(-K_ENODEV);
             if (vfs_mount(g_root_fs_for_syscalls, mount_path, fs_drv, ctx) != 0) {
                 for (uint32_t i = 0; i < VFS_MAX_MOUNTS; i++) {
                     if (&g_mount_fat_ctx[i] == (fat32_fs_t*)ctx) {
@@ -851,7 +892,7 @@ uint32_t do_syscall_impl(
                         break;
                     }
                 }
-                return (uint32_t)-1;
+                return (uint32_t)(-K_EBUSY);
             }
             if (strncmp(fs_name, "/dev/disk/", 10) == 0) {
                 (void)vfs_set_mount_source(g_root_fs_for_syscalls, mount_path, fs_name);
@@ -861,10 +902,10 @@ uint32_t do_syscall_impl(
         case SYS_UMOUNT: {
             char mount_path[256];
             char norm[256];
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, mount_path, sizeof(mount_path)) != 0) return (uint32_t)-1;
-            if (normalize_mount_path_local(mount_path, norm, sizeof(norm)) != 0) return (uint32_t)-1;
-            if (vfs_umount(g_root_fs_for_syscalls, mount_path) != 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_path((const char*)ebx, mount_path, sizeof(mount_path)) != 0) return (uint32_t)(-K_EINVAL);
+            if (normalize_mount_path_local(mount_path, norm, sizeof(norm)) != 0) return (uint32_t)(-K_EINVAL);
+            if (vfs_umount(g_root_fs_for_syscalls, mount_path) != 0) return (uint32_t)(-K_EBUSY);
             for (uint32_t i = 0; i < VFS_MAX_MOUNTS; i++) {
                 if (!g_mount_fat_used[i]) continue;
                 if (strcmp(g_mount_fat_path[i], norm) == 0) {
@@ -877,65 +918,76 @@ uint32_t do_syscall_impl(
             return 0;
         }
         case SYS_LIST_MOUNTS: {
-            if (!g_root_fs_for_syscalls || !ebx || ecx == 0) return (uint32_t)-1;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (!ebx || ecx == 0) return (uint32_t)(-K_EINVAL);
             {
                 ssize_t n = vfs_list_mounts(g_root_fs_for_syscalls, (char*)ebx, (size_t)ecx);
-                if (n < 0) return (uint32_t)-1;
+                if (n < 0) return (uint32_t)(-K_EIO);
                 return (uint32_t)n;
             }
         }
         case SYS_LINK: {
             char oldpath[256];
             char newpath[256];
-            if (!g_root_fs_for_syscalls) return (uint32_t)-1;
-            if (copy_user_path((const char*)ebx, oldpath, sizeof(oldpath)) != 0) return (uint32_t)-1;
-            if (copy_user_path((const char*)ecx, newpath, sizeof(newpath)) != 0) return (uint32_t)-1;
-            return (uint32_t)((vfs_link(g_root_fs_for_syscalls, oldpath, newpath) == 0) ? 0 : -1);
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (copy_user_path((const char*)ebx, oldpath, sizeof(oldpath)) != 0) return (uint32_t)(-K_EINVAL);
+            if (copy_user_path((const char*)ecx, newpath, sizeof(newpath)) != 0) return (uint32_t)(-K_EINVAL);
+            return (uint32_t)((vfs_link(g_root_fs_for_syscalls, oldpath, newpath) == 0) ? 0 : -K_EIO);
         }
         case SYS_SOCKET: {
             int sid;
             int fd;
-            if (ebx != AF_INET || ecx != SOCK_DGRAM || (edx != 0 && edx != IPPROTO_UDP)) return (uint32_t)-1;
+            if (ebx != AF_INET || ecx != SOCK_DGRAM || (edx != 0 && edx != IPPROTO_UDP)) return (uint32_t)(-K_EINVAL);
             sid = udp_socket_alloc();
-            if (sid < 0) return (uint32_t)-1;
+            if (sid < 0) return (uint32_t)(-K_ENFILE);
             fd = fd_alloc_udp(sid);
             if (fd < 0) {
                 udp_socket_free(sid);
-                return (uint32_t)-1;
+                return (uint32_t)(-K_ENFILE);
             }
             return (uint32_t)fd;
         }
         case SYS_BIND: {
             int sid = fd_udp_sid(ebx);
-            if (sid < 0) return (uint32_t)-1;
+            if (sid < 0) return (uint32_t)(-K_EBADF);
             return (uint32_t)udp_bind_socket(sid, (const syscall_sockaddr_in_t*)ecx, edx);
         }
         case SYS_SENDTO: {
             syscall_udp_send_req_t req;
             int sid = fd_udp_sid(ebx);
-            if (sid < 0 || !ecx) return (uint32_t)-1;
+            if (sid < 0) return (uint32_t)(-K_EBADF);
+            if (!ecx) return (uint32_t)(-K_EINVAL);
             memcpy(&req, (const void*)ecx, sizeof(req));
             return (uint32_t)udp_sendto_socket(sid, &req);
         }
         case SYS_RECVFROM: {
             syscall_udp_recv_req_t req;
             int sid = fd_udp_sid(ebx);
-            if (sid < 0 || !ecx) return (uint32_t)-1;
+            if (sid < 0) return (uint32_t)(-K_EBADF);
+            if (!ecx) return (uint32_t)(-K_EINVAL);
             memcpy(&req, (const void*)ecx, sizeof(req));
             return (uint32_t)udp_recvfrom_socket(sid, &req);
         }
         case SYS_SETSOCKOPT: {
             syscall_sockopt_req_t req;
             int sid = fd_udp_sid(ebx);
-            (void)sid;
-            if (sid < 0 || !ecx) return (uint32_t)-1;
+            if (sid < 0) return (uint32_t)(-K_EBADF);
+            if (!ecx) return (uint32_t)(-K_EINVAL);
             memcpy(&req, (const void*)ecx, sizeof(req));
-            if (req.level != 1u) return (uint32_t)-1;
-            if (req.optname == 20u || req.optname == 21u) return 0;
-            return (uint32_t)-1;
+            if (req.level != SOL_SOCKET) return (uint32_t)(-K_EINVAL);
+            if (req.optname == SO_RCVTIMEO) {
+                uint32_t ms = 0;
+                if (!req.optval || req.optlen < sizeof(uint32_t)) return (uint32_t)(-K_EINVAL);
+                memcpy(&ms, req.optval, sizeof(ms));
+                if (ms > 600000u) ms = 600000u;
+                g_udp_sockets[sid].rcv_timeout_ms = (uint16_t)((ms > 65535u) ? 65535u : ms);
+                return 0;
+            }
+            if (req.optname == SO_SNDTIMEO) return 0;
+            return (uint32_t)(-K_ENOTSUP);
         }
         default:
-            return (uint32_t)-1;
+            return (uint32_t)(-K_ENOSYS);
     }
 }
 

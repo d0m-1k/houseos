@@ -8,14 +8,6 @@ CFG_SECTOR = 1
 STAGE2_START = 2
 PAYLOAD_START = $(shell echo $$(( $(STAGE2_START) + $(STAGE2_SECTORS) )))
 
-# Fixed disk layout (stable across kernel/initramfs size changes):
-#   [0] MBR
-#   [1..2] bootcfg
-#   [3..10] stage2
-#   [11..] boot payload (kernel + initramfs), bounded by BOOT_REGION_*
-#   p1: boot region
-#   p2: FAT32 rootfs
-#   p3: FAT32 datafs
 BOOT_REGION_START = 1
 BOOT_REGION_SECTORS = 32768
 ROOTFS_START = 32769
@@ -23,8 +15,17 @@ ROOTFS_SECTORS = 245760
 DATAFS_START = 278529
 DATAFS_SECTORS = 245759
 BOOT_FLAGS ?= 1
+APPLET_PROFILE ?= core
+INITRAMFS_LOAD_ADDR ?= 0x00090000
+APPLETS_core = echo printf pwd ls cat grep mkdir touch rm rmdir cp mv ln tee reboot poweroff mount umount
+APPLETS_full = echo printf hexdump pwd ls cat grep less mkdir mkfifo mksock touch rm rmdir cp mv ln tee chvt ttyinfo kbdinfo mouseinfo reboot poweroff mount umount lsblk udp bootloader vesa vga
+CMD_APPLETS = $(APPLETS_$(APPLET_PROFILE))
 
-.PHONY: all clean run FORCE restart-os rebuild-restart vnc-shot
+ifeq ($(strip $(CMD_APPLETS)),)
+$(error Unsupported APPLET_PROFILE='$(APPLET_PROFILE)'. Use core or full)
+endif
+
+.PHONY: all clean run debug
 
 all: $(SYSTEM_IMG)
 
@@ -44,25 +45,21 @@ $(SYSTEM_IMG): $(BUILD_DIR)/bootloader $(BUILD_DIR)/programs $(BUILD_DIR)/initra
 	fi; \
 	kernel_end=$$((0x$$kernel_end_hex)); \
 	kernel_addr=0x00010000; \
-	kernel_runtime_end=$$((kernel_addr + kernel_end)); \
-	load_floor=$$(((kernel_runtime_end + 0xFFF) & ~0xFFF)); \
-	lowmem_top=0x000A0000; \
-	init_addr=$$(((lowmem_top - init_sz) & ~0xFFF)); \
-	if [ $$init_addr -lt $$load_floor ]; then \
-		echo "ERROR kernel+initramfs do not fit below 0x000A0000 for stage2 preload"; \
-		echo "      kernel runtime end: $$kernel_runtime_end"; \
-		echo "      initramfs size: $$init_sz"; \
-		echo "      computed initramfs addr: $$init_addr"; \
-		exit 1; \
-	fi; \
-	if [ $$init_addr -lt 131072 ]; then \
-		echo "ERROR computed initramfs load address too low: $$init_addr"; \
-		exit 1; \
-	fi; \
+	init_addr=$(INITRAMFS_LOAD_ADDR); \
+	init_addr_num=$$((init_addr)); \
+	init_end=$$((init_addr + init_sz)); \
 	kernel_sec=$$(( (kernel_sz + 511) / 512 )); \
 	init_sec=$$(( (init_sz + 511) / 512 )); \
 	kernel_lba=$(PAYLOAD_START); \
 	init_lba=$$((kernel_lba + kernel_sec)); \
+	if [ $$init_addr_num -lt $$kernel_end ]; then \
+		echo "ERROR initramfs overlaps kernel image: init_addr=$$(printf '0x%X' $$init_addr_num) kernel_end=$$(printf '0x%X' $$kernel_end)"; \
+		exit 1; \
+	fi; \
+	if [ $$init_end -gt $$((0x100000)) ]; then \
+		echo "ERROR initramfs exceeds low memory window: init_end=$$(printf '0x%X' $$init_end) > 0x100000"; \
+		exit 1; \
+	fi; \
 	p1_start=$(CFG_SECTOR); \
 	p1_size=$$((1 + $(STAGE2_SECTORS) + kernel_sec + init_sec)); \
 	p2_start=$$((p1_start + p1_size)); \
@@ -101,41 +98,42 @@ $(SYSTEM_IMG): $(BUILD_DIR)/bootloader $(BUILD_DIR)/programs $(BUILD_DIR)/initra
 	  $$(command -v sfdisk || echo /usr/sbin/sfdisk) --no-reread --no-tell-kernel $@ >/dev/null
 	@echo "DONE  Образ создан: $@"
 
-$(BUILD_DIR)/bootloader: FORCE | $(BUILD_DIR)
+$(BUILD_DIR)/bootloader: | $(BUILD_DIR)
 	@echo "MAKE  bootloader"
 	@$(MAKE) -C bootloader
 	@cp bootloader/build/mbr.bin $(BUILD_DIR)/mbr.bin
 	@cp bootloader/build/st2.bin $(BUILD_DIR)/st2.bin
 	@touch $@
 
-$(BUILD_DIR)/programs: FORCE | $(BUILD_DIR)
+$(BUILD_DIR)/programs: | $(BUILD_DIR)
 	@echo "MAKE  programs"
 	@$(MAKE) -C programs
 	@mkdir -p initramfs/data/bin
 	@mkdir -p initramfs/data/etc
 	@mkdir -p initramfs/data/lib
+	@rm -f initramfs/data/bin/*
 	@cp programs/init/init.elf initramfs/data/bin/init
 	@cp programs/shell/shell.elf initramfs/data/bin/sh
 	@cp programs/cmd/cmd.elf initramfs/data/bin/cmd
-	@for app in echo printf hexdump pwd ls cat grep less mkdir mkfifo mksock touch rm rmdir cp mv ln tee chvt ttyinfo kbdinfo mouseinfo reboot poweroff mount umount lsblk udp bootloader vesa vga; do \
+	@for app in $(CMD_APPLETS); do \
 		ln -f initramfs/data/bin/cmd initramfs/data/bin/$$app; \
 	done
 	@if [ -d programs/build/initramfs/lib ]; then cp -a programs/build/initramfs/lib/. initramfs/data/lib/; fi
-	@strip -s initramfs/data/bin/init initramfs/data/bin/sh initramfs/data/bin/cmd initramfs/data/bin/echo initramfs/data/bin/printf initramfs/data/bin/hexdump initramfs/data/bin/pwd initramfs/data/bin/ls initramfs/data/bin/cat initramfs/data/bin/grep initramfs/data/bin/less initramfs/data/bin/mkdir initramfs/data/bin/mkfifo initramfs/data/bin/mksock initramfs/data/bin/touch initramfs/data/bin/rm initramfs/data/bin/rmdir initramfs/data/bin/cp initramfs/data/bin/mv initramfs/data/bin/ln initramfs/data/bin/tee initramfs/data/bin/chvt initramfs/data/bin/ttyinfo initramfs/data/bin/kbdinfo initramfs/data/bin/mouseinfo initramfs/data/bin/reboot initramfs/data/bin/poweroff initramfs/data/bin/mount initramfs/data/bin/umount initramfs/data/bin/lsblk initramfs/data/bin/udp initramfs/data/bin/bootloader initramfs/data/bin/vesa initramfs/data/bin/vga 2>/dev/null || true
+	@strip -s initramfs/data/bin/init initramfs/data/bin/sh initramfs/data/bin/cmd 2>/dev/null || true
+	@for app in $(CMD_APPLETS); do \
+		strip -s initramfs/data/bin/$$app 2>/dev/null || true; \
+	done
 	@rm -f initramfs/data/bin/settings
 	@rm -f initramfs/data/bin/guishell
 	@rm -f initramfs/data/bin/taskmgr
 	@rm -f initramfs/data/lib/libhstd.so initramfs/data/lib/libhgui.so
 	@cp programs/init/init.conf initramfs/data/etc/init.conf
 	@cp programs/init/fstab initramfs/data/etc/fstab
-	@rm -f initramfs/data/bin/evwatch
-	@rm -f initramfs/data/bin/fbinfo initramfs/data/bin/cad initramfs/data/bin/gui initramfs/data/bin/shell initramfs/data/bin/fb_demo \
-		initramfs/data/bin/netd initramfs/data/bin/default8x16.psf initramfs/data/bin/gfxd initramfs/data/bin/terminal \
-		initramfs/data/bin/composd initramfs/data/bin/wmgrd
+	@rm -f initramfs/data/bin/evwatch initramfs/data/bin/fbinfo initramfs/data/bin/cad initramfs/data/bin/gui initramfs/data/bin/shell \
+		initramfs/data/bin/fb_demo initramfs/data/bin/netd initramfs/data/bin/default8x16.psf initramfs/data/bin/gfxd \
+		initramfs/data/bin/terminal initramfs/data/bin/composd initramfs/data/bin/wmgrd
 	@rm -f initramfs/data/lib/*.a initramfs/data/lib/*.o initramfs/data/lib/*.elf
 	@touch $@
-
-FORCE:
 
 $(BUILD_DIR)/initramfs: $(BUILD_DIR)/programs | $(BUILD_DIR)
 	@echo "MAKE  initramfs"
@@ -143,7 +141,7 @@ $(BUILD_DIR)/initramfs: $(BUILD_DIR)/programs | $(BUILD_DIR)
 	@$(MAKE) -C initramfs all
 	@cp initramfs/initramfs.bin $@.bin
 
-$(BUILD_DIR)/kernel: FORCE | $(BUILD_DIR)
+$(BUILD_DIR)/kernel: | $(BUILD_DIR)
 	@echo "MAKE  kernel"
 	@$(MAKE) -C kernel
 	@cp kernel/build/kernel.bin $@.bin
@@ -166,12 +164,3 @@ clean:
 	@$(MAKE) -C programs clean
 	@$(MAKE) -C kernel clean
 	@rm -rf $(BUILD_DIR)
-
-restart-os:
-	@sudo systemctl restart houseos-qemu.service
-	@sudo systemctl status --no-pager --lines=20 houseos-qemu.service
-
-rebuild-restart: all restart-os
-
-vnc-shot:
-	@./scripts/vnc-capture.sh

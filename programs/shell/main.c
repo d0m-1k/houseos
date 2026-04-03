@@ -40,6 +40,27 @@ static int is_name_char(char c) {
     return is_name_start(c) || (c >= '0' && c <= '9');
 }
 
+static int parse_i32(const char *s, int *out) {
+    int sign = 1;
+    int val = 0;
+    uint32_t i = 0;
+    if (!s || !out || s[0] == '\0') return -1;
+    if (s[0] == '-') {
+        sign = -1;
+        i = 1;
+        if (s[1] == '\0') return -1;
+    } else if (s[0] == '+') {
+        i = 1;
+        if (s[1] == '\0') return -1;
+    }
+    for (; s[i]; i++) {
+        if (s[i] < '0' || s[i] > '9') return -1;
+        val = val * 10 + (s[i] - '0');
+    }
+    *out = val * sign;
+    return 0;
+}
+
 static int read_line(char *buf, uint32_t cap) {
     int32_t r;
     if (!buf || cap < 2u) return -1;
@@ -279,7 +300,7 @@ static int current_tty_path(char *out, uint32_t cap) {
 static int spawn_and_wait(const char *path, const char *cmdline) {
     char tty_path[64];
     int32_t pid;
-    int32_t st;
+    int32_t status = 0;
     int tty_fd;
     if (current_tty_path(tty_path, sizeof(tty_path)) != 0) return -1;
     pid = spawnv(path, tty_path, cmdline);
@@ -288,10 +309,13 @@ static int spawn_and_wait(const char *path, const char *cmdline) {
     if (tty_fd >= 0) {
         (void)ioctl(tty_fd, DEV_IOCTL_TTY_SET_FG_PID, &pid);
     }
-    for (;;) {
-        st = task_state(pid);
-        if (st < 0 || st == 3) break;
-        yield();
+    if (waitpid(pid, &status, 0) < 0) {
+        if (tty_fd >= 0) {
+            int32_t none = -1;
+            (void)ioctl(tty_fd, DEV_IOCTL_TTY_SET_FG_PID, &none);
+            close(tty_fd);
+        }
+        return -1;
     }
     if (tty_fd >= 0) {
         int32_t none = -1;
@@ -536,7 +560,12 @@ static int exec_single(const char *cmd) {
     }
 
     if (strcmp(argv[0], "exit") == 0) {
-        exit(0);
+        int code = 0;
+        if (argc >= 2 && parse_i32(argv[1], &code) != 0) {
+            fprintf(stderr, "usage: exit [code]\n");
+            return -1;
+        }
+        exit(code);
         return 0;
     }
 

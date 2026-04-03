@@ -81,6 +81,25 @@ build/system.img
 make run
 ```
 
+Size tuning for BIOS/stage2 preload:
+
+```bash
+make APPLET_PROFILE=core
+make APPLET_PROFILE=full
+```
+
+## Unix-like Compatibility Status
+
+- procfs: `/proc/version` returns OS release string.
+- procfs: `/proc/self/*` aliases supported.
+- procfs: pid/fd directories support trailing slash (`/proc/<pid>/`, `/proc/<pid>/fd/`).
+- userland: `cmd` works as multi-call binary (`argv[0]` dispatch).
+- userland: `cmd install` resolves executable via `/proc/self/exe` with fallback.
+- shell: wait loop exits on terminated or non-existent child.
+
+Quick contract check:
+Use `make` and a QEMU serial boot run as compatibility smoke checks.
+
 ## Direct Kernel UDP Netlog (Realtek)
 
 HouseOS now has a minimal in-kernel UDP logger (TX path).

@@ -35,6 +35,7 @@ enum {
     SYSCALL_RECVFROM = 29,
     SYSCALL_SETSOCKOPT = 30,
     SYSCALL_TASK_KILL = 31,
+    SYSCALL_WAITPID = 32,
 };
 
 uint32_t syscall0(uint32_t n);
@@ -65,6 +66,7 @@ int32_t spawn(const char *path, const char *tty);
 int32_t spawnv(const char *path, const char *tty, const char *cmdline);
 int32_t task_state(int32_t pid);
 int32_t task_kill(int32_t pid);
+int32_t waitpid(int32_t pid, int32_t *status, uint32_t options);
 int32_t mount(const char *fs_name, const char *mount_path);
 int32_t umount(const char *mount_path);
 int32_t list_mounts(char *buf, uint32_t size);
