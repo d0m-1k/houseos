@@ -571,10 +571,17 @@ int memfs_link(memfs *fs, const char *oldpath, const char *newpath) {
     memfs_inode *old = lookup_path(fs, oldpath);
     memfs_inode *parent;
     char name[256];
+    memfs_dentry *d;
     if (!old) return -1;
     parent = split_parent(fs, newpath, name, NULL);
     if (!parent) return -1;
-    dir_add(parent, old);
+    if (lookup_dentry(parent, name)) return -1;
+    d = dentry_create(old, name);
+    if (!d) return -1;
+    d->next = parent->dir.entries;
+    parent->dir.entries = d;
+    parent->dir.entry_count++;
+    old->link_count++;
     return 0;
 }
 
@@ -706,3 +713,90 @@ int memfs_umount(memfs *target_fs, const char *mount_path) {
     d->mounted_fs = NULL;
     return 0;
 }
+
+static int memfs_open_op(void *fs_ctx, const char *path) {
+    return memfs_open((memfs*)fs_ctx, path);
+}
+
+static int memfs_close_op(void *fs_ctx, int fd) {
+    (void)fs_ctx;
+    return memfs_close(fd);
+}
+
+static ssize_t memfs_read_op(void *fs_ctx, const char *path, void *buf, size_t size) {
+    return memfs_read((memfs*)fs_ctx, path, buf, size);
+}
+
+static ssize_t memfs_write_op(void *fs_ctx, const char *path, const void *buf, size_t size) {
+    return memfs_write((memfs*)fs_ctx, path, buf, size);
+}
+
+static ssize_t memfs_append_op(void *fs_ctx, const char *path, const void *buf, size_t size) {
+    return memfs_append((memfs*)fs_ctx, path, buf, size);
+}
+
+static int memfs_ioctl_op(void *fs_ctx, const char *path, uint32_t request, void *arg) {
+    return memfs_ioctl((memfs*)fs_ctx, path, request, arg);
+}
+
+static int memfs_mkdir_op(void *fs_ctx, const char *path) {
+    return memfs_create_dir((memfs*)fs_ctx, path) ? 0 : -1;
+}
+
+static int memfs_create_file_op(void *fs_ctx, const char *path) {
+    return memfs_create_file((memfs*)fs_ctx, path) ? 0 : -1;
+}
+
+static int memfs_link_op(void *fs_ctx, const char *oldpath, const char *newpath) {
+    return memfs_link((memfs*)fs_ctx, oldpath, newpath);
+}
+
+static int memfs_unlink_op(void *fs_ctx, const char *path) {
+    return memfs_delete_file((memfs*)fs_ctx, path);
+}
+
+static int memfs_rmdir_op(void *fs_ctx, const char *path) {
+    return memfs_delete_dir((memfs*)fs_ctx, path);
+}
+
+static int memfs_mkfifo_op(void *fs_ctx, const char *path) {
+    return memfs_create_fifo((memfs*)fs_ctx, path) ? 0 : -1;
+}
+
+static int memfs_mksock_op(void *fs_ctx, const char *path) {
+    return memfs_create_socket((memfs*)fs_ctx, path) ? 0 : -1;
+}
+
+static ssize_t memfs_list_op(void *fs_ctx, const char *path, char *out, size_t out_size) {
+    return memfs_ls_into((memfs*)fs_ctx, path, out, out_size);
+}
+
+static int memfs_get_info_op(void *fs_ctx, const char *path, vfs_info_t *out) {
+    memfs_inode in;
+    if (!out) return -1;
+    if (memfs_get_info((memfs*)fs_ctx, path, &in) != 0) return -1;
+    out->type = (vfs_node_type_t)in.type;
+    out->mode = in.mode;
+    out->uid = in.uid;
+    out->gid = in.gid;
+    out->size = in.file.size;
+    return 0;
+}
+
+const vfs_ops_t g_memfs_vfs_ops = {
+    memfs_open_op,
+    memfs_close_op,
+    memfs_read_op,
+    memfs_write_op,
+    memfs_append_op,
+    memfs_ioctl_op,
+    memfs_mkdir_op,
+    memfs_create_file_op,
+    memfs_link_op,
+    memfs_unlink_op,
+    memfs_rmdir_op,
+    memfs_mkfifo_op,
+    memfs_mksock_op,
+    memfs_list_op,
+    memfs_get_info_op
+};

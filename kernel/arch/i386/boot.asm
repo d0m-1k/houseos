@@ -7,6 +7,8 @@ extern kmain
 extern __bss_start
 extern __bss_end
 
+KERNEL_BOOT_STACK_TOP equ 0x00070000
+
 _start:
     cli
 
@@ -22,7 +24,7 @@ _start:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov esp, kernel_stack_top
+    mov esp, KERNEL_BOOT_STACK_TOP
     
     call kmain
     

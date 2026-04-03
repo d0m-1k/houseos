@@ -26,6 +26,13 @@ int strcmp(const char *a, const char *b) {
     return (unsigned char)*a - (unsigned char)*b;
 }
 
+int strncmp(const char *a, const char *b, size_t n) {
+    size_t i = 0;
+    while (i < n && a[i] && b[i] && a[i] == b[i]) i++;
+    if (i == n) return 0;
+    return (unsigned char)a[i] - (unsigned char)b[i];
+}
+
 char *strcpy(char *dst, const char *src) {
     char *o = dst;
     while (*src) *dst++ = *src++;

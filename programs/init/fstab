@@ -1,0 +1,3 @@
+# houseos fstab
+# <fs> <mount_path>
+devfs /dev

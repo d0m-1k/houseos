@@ -3,6 +3,7 @@
 #include <asm/processor.h>
 #include <asm/tss.h>
 #include <stddef.h>
+#include <string.h>
 
 static void idle_task(void *arg) {
     (void)arg;
@@ -27,6 +28,18 @@ static inline uint32_t get_esp(void) {
     return esp;
 }
 
+static inline uint32_t irq_save(void) {
+    uint32_t flags;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(flags) :: "memory");
+    cli();
+    return flags;
+}
+
+static inline void irq_restore(uint32_t flags) {
+    if (flags & (1u << 9)) sti();
+    else cli();
+}
+
 void task_init(void (*main_task)(void)) {
     uint8_t *idle_stack = (uint8_t*)kmalloc(STACK_SIZE);
     uint32_t *idle_top = (uint32_t*)(idle_stack + STACK_SIZE);
@@ -39,10 +52,18 @@ void task_init(void (*main_task)(void)) {
     task_t *idle = &tasks[task_count++];
     idle->pid = next_pid++;
     idle->state = TASK_READY;
+    idle->cr3 = mm_kernel_cr3();
+    idle->user_slot = (uint32_t)-1;
+    idle->user_phys_base = 0;
     idle->stack = idle_stack;
     idle->esp = (uint32_t)idle_top;
     idle->esp0 = (uint32_t)(idle_stack + STACK_SIZE);
     idle->wake_tick = 0;
+    idle->exit_status = 0;
+    idle->term_signal = 0;
+    idle->tty_path[0] = '\0';
+    idle->prog_path[0] = '\0';
+    idle->cmdline[0] = '\0';
     idle->next = idle;
 
     _idle_task = idle;
@@ -50,10 +71,18 @@ void task_init(void (*main_task)(void)) {
     task_t *init_task = &tasks[task_count++];
     init_task->pid = next_pid++;
     init_task->state = TASK_RUNNING;
+    init_task->cr3 = mm_kernel_cr3();
+    init_task->user_slot = (uint32_t)-1;
+    init_task->user_phys_base = 0;
     init_task->stack = NULL;
     init_task->esp = get_esp();
     init_task->esp0 = get_esp();
     init_task->wake_tick = 0;
+    init_task->exit_status = 0;
+    init_task->term_signal = 0;
+    init_task->tty_path[0] = '\0';
+    init_task->prog_path[0] = '\0';
+    init_task->cmdline[0] = '\0';
 
     init_task->next = idle;
     idle->next = init_task;
@@ -68,6 +97,7 @@ void task_init(void (*main_task)(void)) {
 int task_create(void (*entry)(void*), void *arg) {
     int slot = -1;
     task_t *task = NULL;
+    uint32_t irq_flags;
 
     uint8_t *stack = (uint8_t*)kmalloc(STACK_SIZE);
     if (!stack) return -1;
@@ -80,8 +110,15 @@ int task_create(void (*entry)(void*), void *arg) {
     *(--top) = 0x202;
     for (int i = 0; i < 7; i++) *(--top) = 0;
 
+    irq_flags = irq_save();
     for (int i = 0; i < task_count; i++) {
         if (tasks[i].state == TASK_TERMINATED) {
+            if (tasks[i].cr3 && tasks[i].cr3 != mm_kernel_cr3()) {
+                mm_user_cr3_destroy(tasks[i].cr3);
+            }
+            if (tasks[i].user_slot != (uint32_t)-1) {
+                mm_user_slot_free(tasks[i].user_slot);
+            }
             slot = i;
             break;
         }
@@ -91,6 +128,7 @@ int task_create(void (*entry)(void*), void *arg) {
         task = &tasks[slot];
     } else {
         if (task_count >= MAX_TASKS) {
+            irq_restore(irq_flags);
             kfree(stack);
             return -1;
         }
@@ -108,11 +146,20 @@ int task_create(void (*entry)(void*), void *arg) {
 
     task->pid = next_pid++;
     task->state = TASK_READY;
+    task->cr3 = mm_kernel_cr3();
+    task->user_slot = (uint32_t)-1;
+    task->user_phys_base = 0;
     task->stack = stack;
     task->esp = (uint32_t)top;
     task->esp0 = (uint32_t)(stack + STACK_SIZE);
     task->wake_tick = 0;
+    task->exit_status = 0;
+    task->term_signal = 0;
+    task->tty_path[0] = '\0';
+    task->prog_path[0] = '\0';
+    task->cmdline[0] = '\0';
 
+    irq_restore(irq_flags);
     return task->pid;
 }
 
@@ -123,6 +170,8 @@ void task_yield(void) {
 }
 
 void task_exit(void) {
+    current_task->exit_status = 0;
+    current_task->term_signal = 0;
     current_task->state = TASK_TERMINATED;
     /* Cannot free the current kernel stack before switching away from it. */
     schedule();
@@ -159,6 +208,7 @@ void schedule(void) {
         if (prev->state == TASK_RUNNING) {
             prev->state = TASK_READY;
         }
+        mm_switch_cr3(current_task->cr3 ? current_task->cr3 : mm_kernel_cr3());
         context_switch(&prev->esp, next->esp);
     } else {
         sti();
@@ -173,4 +223,27 @@ int task_state_by_pid(uint32_t pid) {
         if (tasks[i].pid == pid) return (int)tasks[i].state;
     }
     return -1;
+}
+
+task_t *task_find_by_pid(uint32_t pid) {
+    for (int i = 0; i < task_count; i++) {
+        if (tasks[i].pid == pid) return &tasks[i];
+    }
+    return NULL;
+}
+
+int task_terminate_by_pid(uint32_t pid, int32_t exit_status, uint32_t term_signal) {
+    task_t *task = task_find_by_pid(pid);
+    if (!task || task == _idle_task) return -1;
+    if (task->state == TASK_TERMINATED) return 0;
+    if (task == current_task) {
+        current_task->exit_status = exit_status;
+        current_task->term_signal = term_signal;
+        task_exit();
+        return 0;
+    }
+    task->exit_status = exit_status;
+    task->term_signal = term_signal;
+    task->state = TASK_TERMINATED;
+    return 0;
 }

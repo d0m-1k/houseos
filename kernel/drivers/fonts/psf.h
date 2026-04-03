@@ -28,6 +28,7 @@ typedef struct {
     uint32_t height;
     uint32_t width;
     uint8_t* data;
+    uint8_t* raw_data;
     bool has_unicode_table;
     uint32_t* unicode_table;
 } psf_font_t;

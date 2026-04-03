@@ -9,8 +9,8 @@
 #define EM_386 3
 #define PT_LOAD 1
 
-#define USER_ELF_MIN_VADDR 0x00400000u
-#define USER_ELF_MAX_VADDR 0x04000000u
+#define USER_ELF_MIN_VADDR USER_VADDR_BASE
+#define USER_ELF_MAX_VADDR (USER_VADDR_BASE + USER_VADDR_SIZE)
 
 static int g_elf_last_error = 0;
 
@@ -49,30 +49,30 @@ static int range_ok(uint32_t vaddr, uint32_t size) {
     return 1;
 }
 
-int elf_load_from_memfs(memfs *fs, const char *path, uint32_t *entry_out) {
+int elf_load_from_vfs(vfs_t *fs, const char *path, uint32_t *entry_out) {
     g_elf_last_error = 0;
     if (!fs || !path || !entry_out) {
         g_elf_last_error = 1;
         return -1;
     }
 
-    memfs_inode info;
-    if (memfs_get_info(fs, path, &info) != 0) {
+    vfs_info_t info;
+    if (vfs_get_info(fs, path, &info) != 0) {
         g_elf_last_error = 2;
         return -1;
     }
-    if (info.type != MEMFS_TYPE_FILE || info.file.size < sizeof(elf32_ehdr_t)) {
+    if (info.type != VFS_NODE_FILE || info.size < sizeof(elf32_ehdr_t)) {
         g_elf_last_error = 3;
         return -1;
     }
 
-    uint8_t *file = (uint8_t*)kmalloc(info.file.size);
+    uint8_t *file = (uint8_t*)kmalloc(info.size);
     if (!file) {
         g_elf_last_error = 4;
         return -1;
     }
 
-    if (memfs_read(fs, path, file, info.file.size) != (ssize_t)info.file.size) {
+    if (vfs_read(fs, path, file, info.size) != (ssize_t)info.size) {
         g_elf_last_error = 5;
         kfree(file);
         return -1;
@@ -90,7 +90,7 @@ int elf_load_from_memfs(memfs *fs, const char *path, uint32_t *entry_out) {
         return -1;
     }
 
-    if (eh->e_phoff + (uint32_t)eh->e_phnum * sizeof(elf32_phdr_t) > info.file.size) {
+    if (eh->e_phoff + (uint32_t)eh->e_phnum * sizeof(elf32_phdr_t) > info.size) {
         g_elf_last_error = 7;
         kfree(file);
         return -1;
@@ -104,7 +104,7 @@ int elf_load_from_memfs(memfs *fs, const char *path, uint32_t *entry_out) {
             kfree(file);
             return -1;
         }
-        if (ph[i].p_offset + ph[i].p_filesz > info.file.size) {
+        if (ph[i].p_offset + ph[i].p_filesz > info.size) {
             g_elf_last_error = 9;
             kfree(file);
             return -1;

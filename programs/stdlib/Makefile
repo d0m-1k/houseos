@@ -2,7 +2,7 @@
 include ../common.mk
 
 TARGET := libstdlib.a
-OBJS := $(BUILD_DIR)/crt0.o $(BUILD_DIR)/string.o $(BUILD_DIR)/stdlib.o $(BUILD_DIR)/syscall.o $(BUILD_DIR)/stdio.o
+OBJS := $(BUILD_DIR)/crt0.o $(BUILD_DIR)/string.o $(BUILD_DIR)/stdlib.o $(BUILD_DIR)/syscall.o $(BUILD_DIR)/stdio.o $(BUILD_DIR)/ui_sdk.o $(BUILD_DIR)/dylib.o
 
 all: $(TARGET)
 

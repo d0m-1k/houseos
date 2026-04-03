@@ -41,12 +41,23 @@ static size_t input_start_y = 0;
 
 static char current_dir[MAX_PATH_LENGTH] = "/";
 
-static void path_join(const char *base, const char *rel, char *result) {
-    strcpy(result, base);
-    
-    if (base[strlen(base) - 1] != '/' && rel[0] != '/') strcat(result, "/");
-    
-    strcat(result, rel);
+static int path_join(const char *base, const char *rel, char *result) {
+    size_t blen;
+    size_t rlen;
+    size_t pos = 0;
+    int need_sep;
+    if (!base || !rel || !result) return -1;
+    blen = strlen(base);
+    rlen = strlen(rel);
+    need_sep = (blen > 0 && base[blen - 1] != '/' && rel[0] != '/');
+    if (blen + (need_sep ? 1u : 0u) + rlen >= MAX_PATH_LENGTH) return -1;
+    memcpy(result + pos, base, blen);
+    pos += blen;
+    if (need_sep) result[pos++] = '/';
+    memcpy(result + pos, rel, rlen);
+    pos += rlen;
+    result[pos] = '\0';
+    return 0;
 }
 
 static void normalize_path(const char *input_path, char *output_path) {
@@ -63,7 +74,10 @@ static void normalize_path(const char *input_path, char *output_path) {
         strncpy(output_path + 1, input_path, MAX_PATH_LENGTH - 2);
         output_path[MAX_PATH_LENGTH - 1] = '\0';
     } else {
-        path_join(current_dir, input_path, output_path);
+        if (path_join(current_dir, input_path, output_path) != 0) {
+            output_path[0] = '\0';
+            return;
+        }
     }
     
     char *src = output_path;

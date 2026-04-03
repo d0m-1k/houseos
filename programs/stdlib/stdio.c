@@ -10,6 +10,8 @@
 static FILE g_stdin = { .fd = 0, .eof = 0, .error = 0, .mode = FILE_MODE_READ };
 static FILE g_stdout = { .fd = 1, .eof = 0, .error = 0, .mode = FILE_MODE_WRITE };
 static FILE g_stderr = { .fd = 2, .eof = 0, .error = 0, .mode = FILE_MODE_WRITE };
+static FILE g_fpool[16];
+static uint8_t g_fpool_used[16];
 
 FILE *stdin = &g_stdin;
 FILE *stdout = &g_stdout;
@@ -44,8 +46,6 @@ int fileno(FILE *stream) {
 }
 
 FILE *fopen(const char *path, const char *mode) {
-    static FILE fpool[16];
-    static uint8_t used[16];
     uint32_t flags = 0;
     int fd = -1;
     int m = 0;
@@ -69,13 +69,13 @@ FILE *fopen(const char *path, const char *mode) {
     if (fd < 0) return NULL;
 
     for (int i = 0; i < 16; i++) {
-        if (!used[i]) {
-            used[i] = 1;
-            fpool[i].fd = fd;
-            fpool[i].eof = 0;
-            fpool[i].error = 0;
-            fpool[i].mode = m;
-            return &fpool[i];
+        if (!g_fpool_used[i]) {
+            g_fpool_used[i] = 1;
+            g_fpool[i].fd = fd;
+            g_fpool[i].eof = 0;
+            g_fpool[i].error = 0;
+            g_fpool[i].mode = m;
+            return &g_fpool[i];
         }
     }
 
@@ -84,9 +84,17 @@ FILE *fopen(const char *path, const char *mode) {
 }
 
 int fclose(FILE *stream) {
+    int rc;
     if (!stream) return -1;
     if (stream == stdin || stream == stdout || stream == stderr) return 0;
-    return close(stream->fd);
+    rc = close(stream->fd);
+    for (int i = 0; i < 16; i++) {
+        if (stream == &g_fpool[i]) {
+            g_fpool_used[i] = 0;
+            break;
+        }
+    }
+    return rc;
 }
 
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
@@ -199,9 +207,10 @@ int vfprintf(FILE *stream, const char *fmt, va_list ap) {
         if (*p == 'd' || *p == 'i') {
             int v = va_arg(ap, int);
             if (v < 0) {
+                unsigned int uv = 0u - (unsigned int)v;
                 if (put_c(stream, '-') < 0) return -1;
                 written++;
-                utoa((unsigned int)(-v), num, 10);
+                utoa(uv, num, 10);
             } else {
                 utoa((unsigned int)v, num, 10);
             }

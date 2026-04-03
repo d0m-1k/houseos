@@ -1,7 +1,6 @@
 // images/jpeg.c
 #include <drivers/images/jpeg.h>
 #include <string.h>
-#include <stdlib.h>
 
 // Проверка сигнатуры JPEG
 bool jpeg_verify(const uint8_t* data, size_t size) {

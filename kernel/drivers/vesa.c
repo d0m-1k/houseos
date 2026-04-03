@@ -15,17 +15,21 @@ static uint32_t bytes_per_pixel = 0;
 #define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
 
 bool vesa_init(void) {
+    uint32_t min_pitch;
     if (strncmp(vesa_info->signature, "VESA", 4) != 0) return false;
-    if (mode_info->framebuffer == 0) return false;
-    
-    framebuffer = (uint8_t*)(uintptr_t)mode_info->framebuffer;
+    if ((mode_info->attributes & 0x0001u) == 0u) return false; /* supported */
+    if ((mode_info->attributes & 0x0010u) == 0u) return false; /* graphics mode */
+    if ((mode_info->attributes & 0x0080u) == 0u) return false; /* linear framebuffer */
+    if (mode_info->width == 0 || mode_info->height == 0) return false;
+    if (mode_info->bpp < 8 || mode_info->bpp > 32) return false;
+    if (mode_info->framebuffer < 0x00100000u) return false;
+
     bytes_per_pixel = mode_info->bpp / 8;
-    
-    if (bytes_per_pixel != 1 && bytes_per_pixel != 2 && 
-        bytes_per_pixel != 3 && bytes_per_pixel != 4) {
-        return false;
-    }
-    
+    if (bytes_per_pixel == 0 || bytes_per_pixel > 4) return false;
+    min_pitch = (uint32_t)mode_info->width * bytes_per_pixel;
+    if (mode_info->pitch < min_pitch) return false;
+
+    framebuffer = (uint8_t*)(uintptr_t)mode_info->framebuffer;
     initialized = true;
     return true;
 }

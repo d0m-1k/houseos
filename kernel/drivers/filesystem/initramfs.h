@@ -37,4 +37,5 @@ struct cpio_header {
     char check[8];
 } __attribute__((packed));
 
+uint8_t *initramfs_get_archive_addr(void);
 void initramfs_init(memfs *fs);

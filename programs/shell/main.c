@@ -25,6 +25,9 @@ static char g_history[MAX_HISTORY][MAX_HISTORY_LINE];
 static uint32_t g_history_count = 0;
 static uint32_t g_history_next = 0;
 
+static int append_char(char *dst, uint32_t cap, uint32_t *len, char c);
+static int append_text(char *dst, uint32_t cap, uint32_t *len, const char *src);
+
 static int is_space(char c) {
     return (c == ' ' || c == '\t' || c == '\n' || c == '\r');
 }
@@ -37,42 +40,17 @@ static int is_name_char(char c) {
     return is_name_start(c) || (c >= '0' && c <= '9');
 }
 
-static int streq_n(const char *a, const char *b, uint32_t n) {
-    for (uint32_t i = 0; i < n; i++) {
-        if (a[i] != b[i]) return 0;
-        if (a[i] == '\0') return 1;
-    }
-    return 1;
-}
-
-static int parse_u32_dec(const char *s, uint32_t *out) {
-    uint32_t v = 0;
-    uint32_t i = 0;
-    if (!s || !out || s[0] == '\0') return -1;
-    while (s[i]) {
-        char c = s[i];
-        if (c < '0' || c > '9') return -1;
-        v = v * 10u + (uint32_t)(c - '0');
-        i++;
-    }
-    *out = v;
-    return 0;
-}
-
 static int read_line(char *buf, uint32_t cap) {
-    int32_t n = 0;
-    while (1) {
-        n = read(fileno(stdin), buf, cap - 1);
-        if (n > 0) break;
-        if (n < 0) return -1;
-        sleep(1);
+    int32_t r;
+    if (!buf || cap < 2u) return -1;
+    r = read(fileno(stdin), buf, cap - 1u);
+    if (r <= 0) return r;
+    buf[r] = '\0';
+    while (r > 0 && (buf[r - 1] == '\r' || buf[r - 1] == '\n')) {
+        buf[r - 1] = '\0';
+        r--;
     }
-    buf[n] = '\0';
-    while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) {
-        buf[n - 1] = '\0';
-        n--;
-    }
-    return n;
+    return r;
 }
 
 static char *trim_ws(char *s) {
@@ -228,55 +206,131 @@ static int normalize_path(const char *in, char *out, uint32_t cap) {
     return 0;
 }
 
-static int try_exec_from_path(const char *name) {
-    char full[160];
+static int append_quoted_arg(char *dst, uint32_t cap, uint32_t *len, const char *arg) {
+    int need_quote = 0;
+    uint32_t i = 0;
+    while (arg && arg[i]) {
+        if (is_space(arg[i]) || arg[i] == '"' || arg[i] == '\'' || arg[i] == '\\') {
+            need_quote = 1;
+            break;
+        }
+        i++;
+    }
+    if (!need_quote) return append_text(dst, cap, len, arg);
+
+    if (append_char(dst, cap, len, '"') != 0) return -1;
+    for (i = 0; arg && arg[i]; i++) {
+        if (arg[i] == '"' || arg[i] == '\\') {
+            if (append_char(dst, cap, len, '\\') != 0) return -1;
+        }
+        if (append_char(dst, cap, len, arg[i]) != 0) return -1;
+    }
+    if (append_char(dst, cap, len, '"') != 0) return -1;
+    return 0;
+}
+
+static int build_cmdline_from_argv(char argv[MAX_ARGS][MAX_TOKEN], int argc, char *out, uint32_t cap) {
+    uint32_t len = 0;
+    out[0] = '\0';
+    for (int i = 0; i < argc; i++) {
+        if (i > 0) {
+            if (append_char(out, cap, &len, ' ') != 0) return -1;
+        }
+        if (append_quoted_arg(out, cap, &len, argv[i]) != 0) return -1;
+    }
+    return 0;
+}
+
+static int current_tty_path(char *out, uint32_t cap) {
+    dev_tty_info_t ti;
+    uint32_t idx;
+    uint32_t p = 0;
+    if (!out || cap < 16) return -1;
+    if (ioctl(fileno(stdout), DEV_IOCTL_TTY_GET_INFO, &ti) != 0) return -1;
+    idx = ti.index;
+    out[0] = '\0';
+    if (ti.kind == DEV_TTY_KIND_VESA) {
+        const char *prefix = "/dev/tty/";
+        while (prefix[p]) {
+            if (p + 1 >= cap) return -1;
+            out[p] = prefix[p];
+            p++;
+        }
+    } else {
+        const char *prefix = "/dev/tty/S";
+        while (prefix[p]) {
+            if (p + 1 >= cap) return -1;
+            out[p] = prefix[p];
+            p++;
+        }
+    }
+    if (idx >= 10) {
+        if (p + 2 >= cap) return -1;
+        out[p++] = (char)('0' + (idx / 10));
+        out[p++] = (char)('0' + (idx % 10));
+    } else {
+        if (p + 1 >= cap) return -1;
+        out[p++] = (char)('0' + idx);
+    }
+    out[p] = '\0';
+    return 0;
+}
+
+static int spawn_and_wait(const char *path, const char *cmdline) {
+    char tty_path[64];
+    int32_t pid;
+    int32_t st;
+    int tty_fd;
+    if (current_tty_path(tty_path, sizeof(tty_path)) != 0) return -1;
+    pid = spawnv(path, tty_path, cmdline);
+    if (pid < 0) return -1;
+    tty_fd = open(tty_path, 0);
+    if (tty_fd >= 0) {
+        (void)ioctl(tty_fd, DEV_IOCTL_TTY_SET_FG_PID, &pid);
+    }
+    for (;;) {
+        st = task_state(pid);
+        if (st < 0 || st == 3) break;
+        yield();
+    }
+    if (tty_fd >= 0) {
+        int32_t none = -1;
+        (void)ioctl(tty_fd, DEV_IOCTL_TTY_SET_FG_PID, &none);
+        close(tty_fd);
+    }
+    return 0;
+}
+
+static int is_elf_file(const char *path) {
+    uint8_t hdr[4];
+    int fd = open(path, 0);
+    int32_t n;
+    if (fd < 0) return 0;
+    n = read(fd, hdr, sizeof(hdr));
+    close(fd);
+    if (n != 4) return 0;
+    return (hdr[0] == 0x7F && hdr[1] == 'E' && hdr[2] == 'L' && hdr[3] == 'F');
+}
+
+static int try_exec_from_path(const char *name, const char *cmdline) {
+    char full[192];
     char abs_name[160];
-    uint32_t start = 0;
-    uint32_t name_len = (uint32_t)strlen(name);
 
     if (strchr(name, '/')) {
         if (normalize_path(name, abs_name, sizeof(abs_name)) != 0) return -1;
-        return exec(abs_name);
+        if (!is_elf_file(abs_name)) return -1;
+        return spawn_and_wait(abs_name, cmdline);
     }
 
-    for (uint32_t i = 0;; i++) {
-        char c = g_path[i];
-        if (c == ':' || c == '\0') {
-            uint32_t part_len = i - start;
-            if (part_len > 0 && part_len + 1 + name_len + 1 < sizeof(full)) {
-                memcpy(full, g_path + start, part_len);
-                full[part_len] = '/';
-                memcpy(full + part_len + 1, name, name_len);
-                full[part_len + 1 + name_len] = '\0';
-                if (exec(full) == 0) return 0;
-            }
-            if (c == '\0') break;
-            start = i + 1;
-        }
+    {
+        uint32_t nlen = (uint32_t)strlen(name);
+        if (nlen + 6 >= sizeof(full)) return -1;
+        memcpy(full, "/bin/", 5);
+        memcpy(full + 5, name, nlen);
+        full[5 + nlen] = '\0';
     }
-    return -1;
-}
-
-static void cmd_fbinfo(void) {
-    int fd = open("/devices/framebuffer/buffer", 0);
-    dev_fb_info_t fi;
-    if (fd < 0 || ioctl(fd, DEV_IOCTL_FB_GET_INFO, &fi) != 0) {
-        fprintf(stderr, "fb ioctl error\n");
-        if (fd >= 0) close(fd);
-        return;
-    }
-    fprintf(stdout, "fb %ux%u bpp=%u pitch=%u\n", fi.width, fi.height, fi.bpp, fi.pitch);
-    close(fd);
-}
-
-static void cmd_ttyinfo(void) {
-    dev_tty_info_t ti;
-    if (ioctl(fileno(stdout), DEV_IOCTL_TTY_GET_INFO, &ti) != 0) {
-        fprintf(stderr, "tty ioctl error\n");
-        return;
-    }
-    fprintf(stdout, "tty kind=%u idx=%u cols=%u rows=%u cur=%u,%u\n",
-        ti.kind, ti.index, ti.cols, ti.rows, ti.cursor_x, ti.cursor_y);
+    if (!is_elf_file(full)) return -1;
+    return spawn_and_wait(full, cmdline);
 }
 
 static void update_tty_name(void) {
@@ -312,51 +366,6 @@ static void update_tty_name(void) {
             g_tty_name[6] = '\0';
         }
     }
-}
-
-static void cmd_chvt(const char *arg) {
-    uint32_t idx = 0;
-    int fd = -1;
-    if (parse_u32_dec(arg, &idx) != 0) {
-        fprintf(stderr, "usage: chvt <0-7>\n");
-        return;
-    }
-    fd = open("/devices/tty0", 0);
-    if (fd < 0) {
-        fprintf(stderr, "chvt failed\n");
-        return;
-    }
-    if (ioctl(fd, DEV_IOCTL_TTY_SET_ACTIVE, &idx) != 0) {
-        fprintf(stderr, "chvt failed\n");
-        close(fd);
-        return;
-    }
-    close(fd);
-}
-
-static void cmd_kbdinfo(void) {
-    int fd = open("/devices/keyboard", 0);
-    dev_keyboard_info_t ki;
-    if (fd < 0 || ioctl(fd, DEV_IOCTL_KBD_GET_INFO, &ki) != 0) {
-        fprintf(stderr, "kbd ioctl error\n");
-        if (fd >= 0) close(fd);
-        return;
-    }
-    fprintf(stdout, "kbd layout=%u caps=%u num=%u scroll=%u\n",
-        ki.layout, ki.caps_lock, ki.num_lock, ki.scroll_lock);
-    close(fd);
-}
-
-static void cmd_mouseinfo(void) {
-    int fd = open("/devices/mouse", 0);
-    dev_mouse_info_t mi;
-    if (fd < 0 || ioctl(fd, DEV_IOCTL_MOUSE_GET_INFO, &mi) != 0) {
-        fprintf(stderr, "mouse ioctl error\n");
-        if (fd >= 0) close(fd);
-        return;
-    }
-    fprintf(stdout, "mouse x=%d y=%d btn=%u\n", mi.x, mi.y, mi.buttons);
-    close(fd);
 }
 
 static int append_char(char *dst, uint32_t cap, uint32_t *len, char c) {
@@ -445,6 +454,9 @@ static int parse_argv(const char *cmd, char argv[MAX_ARGS][MAX_TOKEN], int *argc
 static int exec_single(const char *cmd) {
     char argv[MAX_ARGS][MAX_TOKEN];
     int argc = 0;
+    char cmdline[512];
+    char dispatch[700];
+    uint32_t dlen = 0;
     char abs[160];
     char buf[512];
 
@@ -454,27 +466,13 @@ static int exec_single(const char *cmd) {
     }
     if (argc == 0) return 0;
 
-    if (strcmp(argv[0], "help") == 0) {
-        fprintf(stdout, "builtins: help echo cd pwd export unset env history exit\n");
-        fprintf(stdout, "commands: ls cat mkdir mkfifo mksock touch rm rmdir tee run path setpath chvt fbinfo ttyinfo kbdinfo mouseinfo\n");
-        return 0;
-    }
-
-    if (strcmp(argv[0], "env") == 0 || strcmp(argv[0], "path") == 0) {
-        fprintf(stdout, "PATH=%s\nPWD=%s\nTTY=%s\n", g_path, g_pwd, g_tty_name);
-        for (uint32_t i = 0; i < g_var_count; i++) {
-            fprintf(stdout, "%s=%s\n", g_var_name[i], g_var_val[i]);
-        }
-        return 0;
-    }
-
-    if (strcmp(argv[0], "setpath") == 0) {
-        if (argc < 2) {
-            fprintf(stderr, "usage: setpath <PATH>\n");
+    if (argc == 1 && strchr(argv[0], '=')) {
+        char *eq = strchr(argv[0], '=');
+        *eq = '\0';
+        if (set_var(argv[0], eq + 1) != 0) {
+            fprintf(stderr, "set failed\n");
             return -1;
         }
-        strncpy(g_path, argv[1], sizeof(g_path) - 1);
-        g_path[sizeof(g_path) - 1] = '\0';
         return 0;
     }
 
@@ -497,25 +495,32 @@ static int exec_single(const char *cmd) {
         return 0;
     }
 
+    if (strcmp(argv[0], "set") == 0) {
+        if (argc == 1) {
+            fprintf(stdout, "PATH=%s\nPWD=%s\nTTY=%s\n", g_path, g_pwd, g_tty_name);
+            for (uint32_t i = 0; i < g_var_count; i++) {
+                fprintf(stdout, "%s=%s\n", g_var_name[i], g_var_val[i]);
+            }
+            return 0;
+        }
+        if (argc == 2 && strchr(argv[1], '=')) {
+            char *eq = strchr(argv[1], '=');
+            *eq = '\0';
+            if (set_var(argv[1], eq + 1) != 0) {
+                fprintf(stderr, "set failed\n");
+                return -1;
+            }
+            return 0;
+        }
+        fprintf(stderr, "usage: set [NAME=VALUE]\n");
+        return -1;
+    }
+
     if (strcmp(argv[0], "unset") == 0) {
         if (argc < 2 || unset_var(argv[1]) != 0) {
             fprintf(stderr, "unset failed\n");
             return -1;
         }
-        return 0;
-    }
-
-    if (strcmp(argv[0], "history") == 0) {
-        uint32_t base = (g_history_count < MAX_HISTORY) ? 0 : g_history_next;
-        for (uint32_t i = 0; i < g_history_count; i++) {
-            uint32_t idx = (base + i) % MAX_HISTORY;
-            fprintf(stdout, "%u  %s\n", i + 1, g_history[idx]);
-        }
-        return 0;
-    }
-
-    if (strcmp(argv[0], "pwd") == 0) {
-        fprintf(stdout, "%s\n", g_pwd);
         return 0;
     }
 
@@ -530,152 +535,50 @@ static int exec_single(const char *cmd) {
         return 0;
     }
 
-    if (strcmp(argv[0], "echo") == 0) {
-        for (int i = 1; i < argc; i++) {
-            if (i > 1) fprintf(stdout, " ");
-            fprintf(stdout, "%s", argv[i]);
-        }
-        fprintf(stdout, "\n");
-        return 0;
-    }
-
-    if (strcmp(argv[0], "chvt") == 0) {
-        if (argc < 2) {
-            fprintf(stderr, "usage: chvt <0-7>\n");
-            return -1;
-        }
-        cmd_chvt(argv[1]);
-        return 0;
-    }
-
-    if (strcmp(argv[0], "fbinfo") == 0) { cmd_fbinfo(); return 0; }
-    if (strcmp(argv[0], "ttyinfo") == 0) { cmd_ttyinfo(); return 0; }
-    if (strcmp(argv[0], "kbdinfo") == 0) { cmd_kbdinfo(); return 0; }
-    if (strcmp(argv[0], "mouseinfo") == 0) { cmd_mouseinfo(); return 0; }
-
-    if (strcmp(argv[0], "ls") == 0) {
-        const char *target = (argc >= 2) ? argv[1] : g_pwd;
-        if (normalize_path(target, abs, sizeof(abs)) != 0) {
-            fprintf(stderr, "ls failed\n");
-            return -1;
-        }
-        {
-            int32_t n = list(abs, buf, sizeof(buf));
-            if (n < 0) fprintf(stderr, "ls failed\n");
-            else fprintf(stdout, "%s\n", buf);
-        }
-        return 0;
-    }
-
-    if (strcmp(argv[0], "cat") == 0) {
-        int fd;
-        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0) {
-            fprintf(stderr, "cat open failed\n");
-            return -1;
-        }
-        fd = open(abs, 0);
-        if (fd < 0) {
-            fprintf(stderr, "cat open failed\n");
-            return -1;
-        }
-        for (;;) {
-            int32_t n = read(fd, buf, sizeof(buf) - 1);
-            if (n <= 0) break;
-            buf[n] = '\0';
-            fprintf(stdout, "%s", buf);
-            if (n < (int32_t)(sizeof(buf) - 1)) break;
-        }
-        fprintf(stdout, "\n");
-        close(fd);
-        return 0;
-    }
-
-    if (strcmp(argv[0], "mkdir") == 0) {
-        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0 || mkdir(abs) != 0) {
-            fprintf(stderr, "mkdir failed\n");
-            return -1;
-        }
-        return 0;
-    }
-    if (strcmp(argv[0], "mkfifo") == 0) {
-        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0 || mkfifo(abs) != 0) {
-            fprintf(stderr, "mkfifo failed\n");
-            return -1;
-        }
-        return 0;
-    }
-    if (strcmp(argv[0], "mksock") == 0) {
-        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0 || mksock(abs) != 0) {
-            fprintf(stderr, "mksock failed\n");
-            return -1;
-        }
-        return 0;
-    }
-    if (strcmp(argv[0], "touch") == 0) {
-        int fd;
-        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0) {
-            fprintf(stderr, "touch failed\n");
-            return -1;
-        }
-        fd = open(abs, 1);
-        if (fd < 0) {
-            fprintf(stderr, "touch failed\n");
-            return -1;
-        }
-        close(fd);
-        return 0;
-    }
-    if (strcmp(argv[0], "rm") == 0) {
-        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0 || unlink(abs) != 0) {
-            fprintf(stderr, "rm failed\n");
-            return -1;
-        }
-        return 0;
-    }
-    if (strcmp(argv[0], "rmdir") == 0) {
-        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0 || rmdir(abs) != 0) {
-            fprintf(stderr, "rmdir failed\n");
-            return -1;
-        }
-        return 0;
-    }
-    if (strcmp(argv[0], "tee") == 0) {
-        int fd;
-        char ln[MAX_LINE];
-        int32_t n;
-        if (argc < 2 || normalize_path(argv[1], abs, sizeof(abs)) != 0) {
-            fprintf(stderr, "tee open failed\n");
-            return -1;
-        }
-        fd = open(abs, 1);
-        if (fd < 0) {
-            fprintf(stderr, "tee open failed\n");
-            return -1;
-        }
-        n = read(fileno(stdin), ln, sizeof(ln) - 1);
-        if (n > 0) {
-            ln[n] = '\0';
-            write(fileno(stdout), ln, (uint32_t)n);
-            append(fd, ln, (uint32_t)n);
-        }
-        close(fd);
-        return 0;
-    }
-    if (strcmp(argv[0], "run") == 0) {
-        if (argc < 2 || try_exec_from_path(argv[1]) != 0) {
-            fprintf(stderr, "exec failed\n");
-            return -1;
-        }
-        return 0;
-    }
-
     if (strcmp(argv[0], "exit") == 0) {
         exit(0);
         return 0;
     }
 
-    if (try_exec_from_path(argv[0]) != 0) {
-        fprintf(stderr, "unknown command\n");
+    if (strcmp(argv[0], "ls") == 0) {
+        const char *target = (argc >= 2) ? argv[1] : g_pwd;
+        if (normalize_path(target, abs, sizeof(abs)) != 0 || list(abs, buf, sizeof(buf)) < 0) {
+            fprintf(stderr, "ls failed\n");
+            return -1;
+        }
+        fprintf(stdout, "%s\n", buf);
+        return 0;
+    }
+
+    if (build_cmdline_from_argv(argv, argc, cmdline, sizeof(cmdline)) != 0) {
+        fprintf(stderr, "parse error\n");
+        return -1;
+    }
+
+    {
+        int exec_rc = try_exec_from_path(argv[0], cmdline);
+        if (exec_rc == 0) return 0;
+        if (strchr(argv[0], '/')) {
+            char exec_path[160];
+            if (normalize_path(argv[0], exec_path, sizeof(exec_path)) == 0 && is_elf_file(exec_path)) {
+                fprintf(stderr, "exec failed\n");
+                return -1;
+            }
+        }
+    }
+
+    if (!is_elf_file("/bin/cmd")) {
+        fprintf(stderr, "command backend missing: /bin/cmd\n");
+        return -1;
+    }
+
+    dispatch[0] = '\0';
+    if (append_text(dispatch, sizeof(dispatch), &dlen, "--pwd ") != 0) return -1;
+    if (append_quoted_arg(dispatch, sizeof(dispatch), &dlen, g_pwd) != 0) return -1;
+    if (append_char(dispatch, sizeof(dispatch), &dlen, ' ') != 0) return -1;
+    if (append_text(dispatch, sizeof(dispatch), &dlen, cmdline) != 0) return -1;
+    if (spawn_and_wait("/bin/cmd", dispatch) != 0) {
+        fprintf(stderr, "command backend failed: /bin/cmd\n");
         return -1;
     }
     return 0;
@@ -722,15 +625,15 @@ static void redir_spec_init(redir_spec_t *r) {
 
 static int read_file_into(const char *path, char *out, uint32_t cap) {
     int fd;
-    uint32_t len = 0;
+    int32_t n;
     fd = open(path, 0);
     if (fd < 0) return -1;
-    while (len + 1 < cap) {
-        int32_t n = read(fd, out + len, cap - len - 1);
-        if (n <= 0) break;
-        len += (uint32_t)n;
+    n = read(fd, out, cap - 1);
+    if (n < 0) {
+        close(fd);
+        return -1;
     }
-    out[len] = '\0';
+    out[(uint32_t)n] = '\0';
     close(fd);
     return 0;
 }
@@ -919,23 +822,49 @@ static int capture_simple_io(const char *cmd, const char *in_data, char *out, ui
             (void)append_text(err, err_cap, &elen, "cat open failed\n");
             return -1;
         }
-        for (;;) {
+        {
             int32_t n = read(fd, buf, sizeof(buf));
-            if (n <= 0) break;
-            for (int32_t i = 0; i < n; i++) {
-                if (append_char(out, out_cap, &olen, buf[i]) != 0) {
-                    close(fd);
-                    return -1;
+            if (n > 0) {
+                for (int32_t i = 0; i < n; i++) {
+                    if (append_char(out, out_cap, &olen, buf[i]) != 0) {
+                        close(fd);
+                        return -1;
+                    }
                 }
+            } else if (n < 0) {
+                close(fd);
+                (void)append_text(err, err_cap, &elen, "cat open failed\n");
+                return -1;
             }
-            if (n < (int32_t)sizeof(buf)) break;
         }
         close(fd);
         return 0;
     }
 
-    if (strcmp(argv[0], "help") == 0) {
-        (void)append_text(out, out_cap, &olen, "builtins: help echo cd pwd export unset env history exit\n");
+    if (strcmp(argv[0], "tee") == 0) {
+        int fd;
+        const char *src = in_data ? in_data : "";
+        uint32_t nsrc = (uint32_t)strlen(src);
+        if (argc < 2) {
+            (void)append_text(err, err_cap, &elen, "usage: tee <path>\n");
+            return -1;
+        }
+        if (normalize_path(argv[1], abs, sizeof(abs)) != 0) {
+            (void)append_text(err, err_cap, &elen, "tee open failed\n");
+            return -1;
+        }
+        fd = open(abs, 1);
+        if (fd < 0) {
+            (void)append_text(err, err_cap, &elen, "tee open failed\n");
+            return -1;
+        }
+        if (nsrc != 0 && append(fd, src, nsrc) < 0) {
+            close(fd);
+            (void)append_text(err, err_cap, &elen, "tee write failed\n");
+            return -1;
+        }
+        close(fd);
+        if (append_text(out, out_cap, &olen, src) != 0) return -1;
         return 0;
     }
 
@@ -1067,19 +996,28 @@ static int exec_line(char *line) {
     return 0;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     char line[MAX_LINE];
 
     update_tty_name();
     (void)set_var("PATH", g_path);
     (void)set_var("PWD", g_pwd);
-    printf("houseos shell in %s\n", g_tty_name);
-    printf("bash-like mode: quotes, ;, $VAR, export/unset/history/help\n");
+    if (argc >= 3 && strcmp(argv[1], "-c") == 0) {
+        return exec_line(argv[2]);
+    }
+
+    printf("houseos sh in %s\n", g_tty_name);
 
     for (;;) {
+        int line_rc;
         update_tty_name();
         printf("sh:%s$ ", g_pwd);
-        if (read_line(line, sizeof(line)) <= 0) continue;
+        line_rc = read_line(line, sizeof(line));
+        if (line_rc < 0) continue;
+        if (line_rc == 0) {
+            printf("\n");
+            exit(0);
+        }
         history_push(line);
         (void)exec_line(line);
     }

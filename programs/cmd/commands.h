@@ -1,0 +1,33 @@
+#pragma once
+
+int cmd_echo(int argc, char **argv, int arg0, const char *cwd);
+int cmd_printf(int argc, char **argv, int arg0, const char *cwd);
+int cmd_hexdump(int argc, char **argv, int arg0, const char *cwd);
+int cmd_pwd(int argc, char **argv, int arg0, const char *cwd);
+int cmd_ls(int argc, char **argv, int arg0, const char *cwd);
+int cmd_cat(int argc, char **argv, int arg0, const char *cwd);
+int cmd_grep(int argc, char **argv, int arg0, const char *cwd);
+int cmd_less(int argc, char **argv, int arg0, const char *cwd);
+int cmd_mkdir(int argc, char **argv, int arg0, const char *cwd);
+int cmd_mkfifo(int argc, char **argv, int arg0, const char *cwd);
+int cmd_mksock(int argc, char **argv, int arg0, const char *cwd);
+int cmd_touch(int argc, char **argv, int arg0, const char *cwd);
+int cmd_rm(int argc, char **argv, int arg0, const char *cwd);
+int cmd_rmdir(int argc, char **argv, int arg0, const char *cwd);
+int cmd_cp(int argc, char **argv, int arg0, const char *cwd);
+int cmd_mv(int argc, char **argv, int arg0, const char *cwd);
+int cmd_ln(int argc, char **argv, int arg0, const char *cwd);
+int cmd_tee(int argc, char **argv, int arg0, const char *cwd);
+int cmd_chvt(int argc, char **argv, int arg0, const char *cwd);
+int cmd_ttyinfo(int argc, char **argv, int arg0, const char *cwd);
+int cmd_kbdinfo(int argc, char **argv, int arg0, const char *cwd);
+int cmd_mouseinfo(int argc, char **argv, int arg0, const char *cwd);
+int cmd_reboot(int argc, char **argv, int arg0, const char *cwd);
+int cmd_poweroff(int argc, char **argv, int arg0, const char *cwd);
+int cmd_mount(int argc, char **argv, int arg0, const char *cwd);
+int cmd_umount(int argc, char **argv, int arg0, const char *cwd);
+int cmd_lsblk(int argc, char **argv, int arg0, const char *cwd);
+int cmd_udp(int argc, char **argv, int arg0, const char *cwd);
+int cmd_bootloader(int argc, char **argv, int arg0, const char *cwd);
+int cmd_vesa(int argc, char **argv, int arg0, const char *cwd);
+int cmd_vga(int argc, char **argv, int arg0, const char *cwd);

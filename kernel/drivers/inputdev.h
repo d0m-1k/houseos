@@ -1,5 +1,5 @@
 #pragma once
 
-#include <drivers/filesystem/memfs.h>
+#include <drivers/filesystem/devfs.h>
 
-void inputdev_init(memfs *root_fs);
+void inputdev_init(devfs_t *devfs);

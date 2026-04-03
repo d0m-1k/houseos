@@ -1,0 +1,4 @@
+#pragma once
+
+#define HOUSEOS_VERSION_STR "0.1.0"
+#define HOUSEOS_RELEASE_STR "HouseOS " HOUSEOS_VERSION_STR

@@ -45,6 +45,7 @@ static bool pause_break = false;
 static uint8_t last_scancode = 0;
 static size_t current_layout = 0;
 static keyboard_hotkey_handler_t hotkey_handler = NULL;
+static int hotkey_latched_scancode = -1;
 
 static uint8_t pause_buffer[6];
 static int pause_index = 0;
@@ -130,6 +131,17 @@ static char get_ascii(uint8_t scancode, bool shift) {
     return keyboard_map[current_layout][shift ? 1 : 0][scancode];
 }
 
+static bool keyboard_is_alpha_scancode(uint8_t scancode) {
+    return ((scancode >= 0x10 && scancode <= 0x19) ||
+            (scancode >= 0x1E && scancode <= 0x26) ||
+            (scancode >= 0x2C && scancode <= 0x32));
+}
+
+static bool keyboard_effective_shift(uint8_t scancode, bool shift, bool caps) {
+    if (!keyboard_is_alpha_scancode(scancode)) return shift;
+    return shift ^ caps;
+}
+
 static bool is_ext_scancode(uint8_t scancode) {
     for (int i = 0; ext_scancodes[i] != 0; i++) {
         if (ext_scancodes[i] == scancode) return true;
@@ -182,6 +194,14 @@ static void handle_special_key(uint8_t scancode, bool pressed) {
 }
 
 static void handle_extended_scancode(uint8_t scancode, bool pressed) {
+    if (scancode == KEY_LCTRL) {
+        ctrl_pressed = pressed;
+        return;
+    }
+    if (scancode == KEY_LALT) {
+        alt_pressed = pressed;
+        return;
+    }
     if (!pressed) return;
     
     struct key_event event = {
@@ -255,11 +275,7 @@ bool keyboard_scancode_available(void) {
 }
 
 char keyboard_scancode_to_ascii(uint8_t scancode) {
-    bool shift = shift_pressed;
-    
-    if (scancode >= 0x10 && scancode <= 0x19)
-        shift = shift_pressed ^ caps_lock;
-    
+    bool shift = keyboard_effective_shift(scancode, shift_pressed, caps_lock);
     return get_ascii(scancode, shift);
 }
 
@@ -274,6 +290,7 @@ void keyboard_init(void) {
     ext_scancode = false;
     pause_break = false;
     pause_index = 0;
+    hotkey_latched_scancode = -1;
     
     outb(0x64, 0xAD);
     
@@ -289,8 +306,7 @@ void keyboard_init(void) {
     outb(0x21, inb(0x21) & 0xFD);
 }
 
-void keyboard_handler(void) {
-    uint8_t scancode = inb(0x60);
+static void keyboard_process_scancode(uint8_t scancode) {
     last_scancode = scancode;
     
     scancode_buffer_put(scancode);
@@ -337,13 +353,20 @@ void keyboard_handler(void) {
     
     handle_special_key(keycode, pressed);
 
-    if (pressed && alt_pressed && keycode >= KEY_1 && keycode <= KEY_8) {
-        if (hotkey_handler) hotkey_handler(keycode, true, shift_pressed, ctrl_pressed, alt_pressed);
+    if (!pressed && hotkey_latched_scancode == (int)keycode) {
+        hotkey_latched_scancode = -1;
+    }
+
+    if (pressed && (keycode >= KEY_F1 && keycode <= KEY_F8) && ctrl_pressed && (shift_pressed || alt_pressed)) {
+        if (hotkey_latched_scancode != (int)keycode) {
+            if (hotkey_handler) hotkey_handler(keycode, true, shift_pressed, ctrl_pressed, alt_pressed);
+            hotkey_latched_scancode = (int)keycode;
+        }
         return;
     }
     
     if (pressed) {
-        bool effective_shift = shift_pressed ^ caps_lock;
+        bool effective_shift = keyboard_effective_shift(keycode, shift_pressed, caps_lock);
         char ascii = get_ascii(keycode, effective_shift);
         
         struct key_event event = {
@@ -420,6 +443,18 @@ void keyboard_handler(void) {
     }
 }
 
+void keyboard_handler(void) {
+    uint8_t status = inb(0x64);
+    uint8_t scancode;
+    if ((status & 0x01u) == 0u) return;
+    if (status & 0x20u) {
+        (void)inb(0x60);
+        return;
+    }
+    scancode = inb(0x60);
+    keyboard_process_scancode(scancode);
+}
+
 char keyboard_getchar(void) {
     while (buffer_count == 0) hlt();
     return buffer_get();
@@ -490,6 +525,14 @@ void keyboard_clear_buffers(void) {
     buffer_head = buffer_tail = buffer_count = 0;
     event_head = event_tail = event_count = 0;
     scancode_head = scancode_tail = scancode_count = 0;
+    /* Drop transient modifier/chord state so tty switch cannot leave keys "stuck". */
+    shift_pressed = false;
+    ctrl_pressed = false;
+    alt_pressed = false;
+    ext_scancode = false;
+    pause_break = false;
+    pause_index = 0;
+    hotkey_latched_scancode = -1;
 }
 
 uint8_t keyboard_get_last_scancode(void) {
@@ -507,4 +550,67 @@ size_t keyboard_get_layout(void) {
 
 void keyboard_set_hotkey_handler(keyboard_hotkey_handler_t handler) {
     hotkey_handler = handler;
+}
+
+void keyboard_inject_scancode(uint8_t scancode) {
+    uint32_t flags;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(flags) :: "memory");
+    cli();
+    keyboard_process_scancode(scancode);
+    if (flags & (1u << 9)) sti();
+    else cli();
+}
+
+void keyboard_inject_event(uint8_t scancode, char ascii, bool pressed, bool shift, bool ctrl, bool alt, bool caps) {
+    uint32_t flags;
+    struct key_event event;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(flags) :: "memory");
+    cli();
+
+    shift_pressed = shift;
+    ctrl_pressed = ctrl;
+    alt_pressed = alt;
+    caps_lock = caps;
+    last_scancode = scancode;
+    scancode_buffer_put(scancode);
+
+    if (!pressed && hotkey_latched_scancode == (int)scancode) {
+        hotkey_latched_scancode = -1;
+    }
+    if (pressed && (scancode >= KEY_F1 && scancode <= KEY_F8) && ctrl_pressed && (shift_pressed || alt_pressed)) {
+        if (hotkey_latched_scancode != (int)scancode) {
+            if (hotkey_handler) hotkey_handler(scancode, true, shift_pressed, ctrl_pressed, alt_pressed);
+            hotkey_latched_scancode = (int)scancode;
+        }
+    }
+
+    event.scancode = scancode;
+    event.ascii = ascii;
+    event.pressed = pressed;
+    event.shift = shift_pressed;
+    event.ctrl = ctrl_pressed;
+    event.alt = alt_pressed;
+    event.caps = caps_lock;
+    event_buffer_put(event);
+
+    if (pressed && ascii != 0) {
+        if (ctrl_pressed) {
+            switch (ascii) {
+                case 'c': case 'C': buffer_put(0x03); break;
+                case 'd': case 'D': buffer_put(0x04); break;
+                case 'z': case 'Z': buffer_put(0x1A); break;
+                case 'l': case 'L': buffer_put(0x0C); break;
+                default:
+                    if (ascii >= 'a' && ascii <= 'z') buffer_put((char)(ascii - 'a' + 1));
+                    else if (ascii >= 'A' && ascii <= 'Z') buffer_put((char)(ascii - 'A' + 1));
+                    else buffer_put(ascii);
+                    break;
+            }
+        } else if (!alt_pressed) {
+            buffer_put(ascii);
+        }
+    }
+
+    if (flags & (1u << 9)) sti();
+    else cli();
 }

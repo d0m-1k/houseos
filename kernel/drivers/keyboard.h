@@ -141,3 +141,5 @@ uint8_t keyboard_get_last_scancode(void);
 void keyboard_set_layout(size_t layout_index);
 size_t keyboard_get_layout(void);
 void keyboard_set_hotkey_handler(keyboard_hotkey_handler_t handler);
+void keyboard_inject_scancode(uint8_t scancode);
+void keyboard_inject_event(uint8_t scancode, char ascii, bool pressed, bool shift, bool ctrl, bool alt, bool caps);

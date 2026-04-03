@@ -11,7 +11,17 @@ static void* heap_end = NULL;
 static block_header_t* free_list = NULL;
 static size_t total_heap_size = 0;
 static size_t used_heap_size = 0;
+static uint32_t kernel_page_directory[1024] __attribute__((aligned(4096)));
+static uint8_t paging_enabled = 0;
+static uint8_t user_slot_used[USER_SLOT_COUNT];
 struct mm_map global_mmap;
+
+#define CR0_PG 0x80000000u
+#define CR4_PSE 0x00000010u
+#define PDE_PRESENT 0x001u
+#define PDE_RW 0x002u
+#define PDE_USER 0x004u
+#define PDE_PS 0x080u
 
 static size_t align_size(size_t size) {
     return (size + (ALIGNMENT - 1)) & ~(ALIGNMENT - 1);
@@ -140,9 +150,83 @@ void mm_init(void) {
     }
 }
 
+void paging_init(void) {
+    uint32_t cr0;
+    uint32_t cr4;
+
+    for (uint32_t i = 0; i < 1024; i++) {
+        kernel_page_directory[i] = (i << 22) | PDE_PRESENT | PDE_RW | PDE_PS;
+    }
+    memset(user_slot_used, 0, sizeof(user_slot_used));
+
+    __asm__ __volatile__("mov %%cr4, %0" : "=r"(cr4));
+    cr4 |= CR4_PSE;
+    __asm__ __volatile__("mov %0, %%cr4" : : "r"(cr4) : "memory");
+
+    __asm__ __volatile__("mov %0, %%cr3" : : "r"((uint32_t)kernel_page_directory) : "memory");
+
+    __asm__ __volatile__("mov %%cr0, %0" : "=r"(cr0));
+    cr0 |= CR0_PG;
+    __asm__ __volatile__("mov %0, %%cr0" : : "r"(cr0) : "memory");
+
+    paging_enabled = 1;
+}
+
+uint32_t mm_kernel_cr3(void) {
+    return (uint32_t)kernel_page_directory;
+}
+
+void mm_switch_cr3(uint32_t cr3_phys) {
+    if (!paging_enabled || !cr3_phys) return;
+    __asm__ __volatile__("mov %0, %%cr3" : : "r"(cr3_phys) : "memory");
+}
+
+int mm_user_slot_alloc(uint32_t *slot_idx_out, uint32_t *phys_base_out) {
+    uint32_t idx;
+    uint32_t phys;
+
+    if (!slot_idx_out || !phys_base_out) return -1;
+
+    for (idx = 0; idx < USER_SLOT_COUNT; idx++) {
+        if (!user_slot_used[idx]) {
+            user_slot_used[idx] = 1;
+            phys = USER_SLOT_BASE_PHYS + idx * USER_SLOT_SIZE_PHYS;
+            memset((void*)(uintptr_t)phys, 0, USER_SLOT_SIZE_PHYS);
+            *slot_idx_out = idx;
+            *phys_base_out = phys;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+void mm_user_slot_free(uint32_t slot_idx) {
+    if (slot_idx >= USER_SLOT_COUNT) return;
+    user_slot_used[slot_idx] = 0;
+}
+
+uint32_t mm_user_cr3_create(uint32_t user_phys_base) {
+    uint32_t *pd;
+    uint32_t user_pde;
+
+    if ((user_phys_base & (USER_SLOT_SIZE_PHYS - 1u)) != 0) return 0;
+    pd = (uint32_t*)valloc_aligned(4096, 4096);
+    if (!pd) return 0;
+
+    memcpy(pd, kernel_page_directory, 4096);
+    user_pde = (user_phys_base & 0xFFC00000u) | PDE_PRESENT | PDE_RW | PDE_USER | PDE_PS;
+    pd[USER_VADDR_BASE >> 22] = user_pde;
+    return (uint32_t)pd;
+}
+
+void mm_user_cr3_destroy(uint32_t cr3_phys) {
+    if (!cr3_phys || cr3_phys == (uint32_t)kernel_page_directory) return;
+    vfree((void*)(uintptr_t)cr3_phys);
+}
+
 void kmalloc_init(void) {
     uint64_t heap_base = 0x900000;
-    uint64_t heap_size = 0x400000;
+    uint64_t heap_size = 0x1000000;
     int heap_region_found = 0;
 
     for (uint32_t i = 0; i < global_mmap.count; i++) {

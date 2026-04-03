@@ -52,18 +52,15 @@ vesa_load:
 .vesa_error:
     mov si, vesa_err_msg
     call print
-    cli
-    hlt
+    ret
 .mode_error:
     mov si, mode_err_msg
     call print
-    cli
-    hlt
+    ret
 .switch_error:
     mov si, switch_err_msg
     call print
-    cli
-    hlt
+    ret
 
 vesa_err_msg: db "VESA error!", 0
 mode_err_msg: db "Mode error!", 0

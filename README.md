@@ -81,7 +81,33 @@ build/system.img
 make run
 ```
 
-### Отладка с GDB:
+## Direct Kernel UDP Netlog (Realtek)
+
+HouseOS now has a minimal in-kernel UDP logger (TX path).
+
+- Driver file: `kernel/drivers/netlog.c`
+- Auto-init: after `pci_init()` in `kernel/kernel/kernel.c`
+- Log hook: every `tty_klog()` line is mirrored to UDP in `kernel/drivers/tty.c`
+
+Supported NICs:
+
+- `RTL8139` (QEMU flow)
+- `RTL8168/RTL8169/RTL8161` (real hardware, TX-only)
+
+Default profiles:
+
+- `RTL8139`: `10.0.2.15 -> 10.0.2.2:6666` (QEMU usernet)
+- `RTL8168/69`: broadcast (`255.255.255.255:6666`) for quick LAN log pickup
+
+Example QEMU run:
+
+```bash
+qemu-system-x86_64 -display none -serial stdio \
+  -drive format=raw,file=build/system.img \
+  -netdev user,id=n0 -device rtl8139,netdev=n0
+```
+
+Debug (GDB stub):
 
 ```bash
 make debug
@@ -140,4 +166,4 @@ Pull requests приветствуются. Если хочешь добавит
 
 ## 📄 Лицензия
 
-MIT
+GPL-2.0-only

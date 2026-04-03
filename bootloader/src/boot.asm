@@ -27,6 +27,7 @@ _start:
     mov es, ax
     mov ss, ax
     mov sp, 0x7C00
+    mov esp, 0x00007C00
 
     mov [boot_drive], dl
 
@@ -76,13 +77,12 @@ _start:
     mov ax, [cfg_base + CFG_VESA_MODE]
     mov [vesa_mode_value], ax
 
-    mov eax, [cfg_base + CFG_KERNEL_ADDR]
-    mov [pm_entry_addr], eax
+    mov dword [pm_entry_addr], 0x00010000
 
     mov si, msg_load_kernel
     call dbg_print
     mov eax, [cfg_base + CFG_KERNEL_LBA]
-    mov ebx, [cfg_base + CFG_KERNEL_ADDR]
+    mov ebx, 0x00010000
     mov ecx, [cfg_base + CFG_KERNEL_SIZE]
     call load_blob
     jc .disk_kernel_error
@@ -201,10 +201,10 @@ load_blob:
 linear_to_seg_off:
     push bx
     mov ebx, eax
-    and bx, 0x000F
     mov ax, bx
-    shr eax, 4
-    mov dx, ax
+    and ax, 0x000F
+    shr ebx, 4
+    mov dx, bx
     pop bx
     ret
 

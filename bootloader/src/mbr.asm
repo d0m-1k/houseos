@@ -11,7 +11,7 @@ _start:
     mov sp, 0x7C00
 
     mov ah, 0x02
-    mov al, 4
+    mov al, 8
     mov ch, 0x00
     mov cl, 3
     mov dh, 0x00

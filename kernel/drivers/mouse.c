@@ -78,6 +78,31 @@ static void queue_push(mouse_packet_t p) {
     g_count++;
 }
 
+void mouse_inject_packet(uint8_t buttons, int16_t x_movement, int16_t y_movement) {
+    mouse_packet_t p;
+
+    p.buttons = (uint8_t)(buttons & 0x1Fu);
+    p.x_movement = x_movement;
+    p.y_movement = y_movement;
+    g_buttons = p.buttons;
+
+    g_x += p.x_movement;
+    g_y -= p.y_movement;
+
+    if (vesa_is_initialized()) {
+        int16_t max_x = (int16_t)(vesa_get_width() ? (vesa_get_width() - 1) : 0);
+        int16_t max_y = (int16_t)(vesa_get_height() ? (vesa_get_height() - 1) : 0);
+        if (g_x < 0) g_x = 0;
+        if (g_y < 0) g_y = 0;
+        if (g_x > max_x) g_x = max_x;
+        if (g_y > max_y) g_y = max_y;
+    }
+
+    p.x = g_x;
+    p.y = g_y;
+    queue_push(p);
+}
+
 bool mouse_available(void) {
     return g_count != 0;
 }
@@ -146,28 +171,7 @@ void mouse_handler(void) {
         uint8_t b2 = g_packet[2];
 
         if (b0 & 0xC0) return;
-
-        mouse_packet_t p;
-        p.buttons = b0 & 0x07;
-        p.x_movement = (int8_t)b1;
-        p.y_movement = (int8_t)b2;
-        g_buttons = p.buttons;
-
-        g_x += p.x_movement;
-        g_y -= p.y_movement;
-
-        if (vesa_is_initialized()) {
-            int16_t max_x = (int16_t)(vesa_get_width() ? (vesa_get_width() - 1) : 0);
-            int16_t max_y = (int16_t)(vesa_get_height() ? (vesa_get_height() - 1) : 0);
-            if (g_x < 0) g_x = 0;
-            if (g_y < 0) g_y = 0;
-            if (g_x > max_x) g_x = max_x;
-            if (g_y > max_y) g_y = max_y;
-        }
-        p.x = g_x;
-        p.y = g_y;
-
-        queue_push(p);
+        mouse_inject_packet((uint8_t)(b0 & 0x07), (int16_t)(int8_t)b1, (int16_t)(int8_t)b2);
     }
 }
 

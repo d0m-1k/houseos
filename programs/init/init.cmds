@@ -1,0 +1,4 @@
+# commands executed on /dev/tty/S0 after init spawns shells
+ls /dev/disk
+kbdinfo
+mouseinfo

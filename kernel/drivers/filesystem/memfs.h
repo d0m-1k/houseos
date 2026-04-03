@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <drivers/filesystem/vfs.h>
 
 typedef struct _memfs_inode memfs_inode;
 typedef struct _memfs_dentry memfs_dentry;
@@ -113,3 +114,5 @@ ssize_t memfs_ls_into(memfs *fs, const char *path, char *out, size_t out_size);
 char* memfs_ls(memfs *fs, const char *path);
 int memfs_mount(memfs *target_fs, const char *mount_path, memfs *mounted_fs);
 int memfs_umount(memfs *target_fs, const char *mount_path);
+
+extern const vfs_ops_t g_memfs_vfs_ops;

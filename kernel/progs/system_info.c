@@ -27,6 +27,18 @@ static void append_hex(char *out, uint32_t *len, uint32_t max, uint32_t v) {
     append_s(out, len, max, n);
 }
 
+static uint32_t cpu_logical_cores(void) {
+    uint32_t eax, ebx, ecx, edx;
+    eax = 1;
+    ecx = 0;
+    __asm__ __volatile__("cpuid"
+        : "+a"(eax), "=b"(ebx), "+c"(ecx), "=d"(edx)
+        :
+        : "memory");
+    if (((ebx >> 16) & 0xFFu) == 0) return 1;
+    return (ebx >> 16) & 0xFFu;
+}
+
 static void system_info_on_draw(window_t *win, void *user_data) {
     system_info_state_t *st = (system_info_state_t*)user_data;
     if (!win || !st || !st->gs) return;
@@ -64,6 +76,8 @@ static void system_info_on_draw(window_t *win, void *user_data) {
     append_s(left, &llen, sizeof(left), "Uptime:\n");
     append_s(left, &llen, sizeof(left), "  ticks: "); append_u(left, &llen, sizeof(left), ticks); append_s(left, &llen, sizeof(left), "\n");
     append_s(left, &llen, sizeof(left), "  time: "); append_u(left, &llen, sizeof(left), up_s); append_s(left, &llen, sizeof(left), "."); append_u(left, &llen, sizeof(left), up_ms); append_s(left, &llen, sizeof(left), " s\n");
+    append_s(left, &llen, sizeof(left), "CPU:\n");
+    append_s(left, &llen, sizeof(left), "  logical_cores: "); append_u(left, &llen, sizeof(left), cpu_logical_cores()); append_s(left, &llen, sizeof(left), "\n\n");
 
     append_s(right, &rlen, sizeof(right), "Initramfs:\n");
     append_s(right, &rlen, sizeof(right), "  total: "); append_u(right, &rlen, sizeof(right), (uint32_t)fs->total_memory); append_s(right, &rlen, sizeof(right), "\n");

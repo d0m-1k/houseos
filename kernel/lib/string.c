@@ -81,10 +81,9 @@ char* strchr(const char* str, int ch) {
 /* Поиск последнего вхождения символа */
 char* strrchr(const char* str, int ch) {
     const char* last = NULL;
-    while (*str) {
+    do {
         if (*str == (char)ch) last = str;
-        str++;
-    }
+    } while (*str++);
     return (char*)last;
 }
 
@@ -241,27 +240,30 @@ char* itoa(int value, char* str, int base) {
     char* rc;
     char* ptr;
     char* low;
+    unsigned int uvalue;
     
     if (base < 2 || base > 36) {
         *str = '\0';
         return str;
     }
     
-    rc = ptr = str;
-    
+    rc = str;
+    ptr = str;
+
     // Handle negative numbers
     if (value < 0 && base == 10) {
         *ptr++ = '-';
-        rc = ptr;
-        value = -value;
+        uvalue = 0u - (unsigned int)value;
+    } else {
+        uvalue = (unsigned int)value;
     }
     
     low = ptr;
     
     do {
-        *ptr++ = "0123456789abcdefghijklmnopqrstuvwxyz"[value % base];
-        value /= base;
-    } while (value);
+        *ptr++ = "0123456789abcdefghijklmnopqrstuvwxyz"[uvalue % (unsigned int)base];
+        uvalue /= (unsigned int)base;
+    } while (uvalue);
     
     *ptr-- = '\0';
     

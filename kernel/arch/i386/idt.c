@@ -74,6 +74,10 @@ void idt_handler(uint8_t num, uint32_t err_code) {
         handler(num, err_code);
     } else {
         if (num < 32) {
+            if (current_task && current_task != _idle_task) {
+                task_exit();
+                return;
+            }
             while (1) __asm__ __volatile__("hlt");
         }
     }

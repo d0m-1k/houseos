@@ -19,3 +19,4 @@ bool mouse_try_get_packet(mouse_packet_t* out);
 int16_t mouse_get_x(void);
 int16_t mouse_get_y(void);
 uint8_t mouse_get_buttons(void);
+void mouse_inject_packet(uint8_t buttons, int16_t x_movement, int16_t y_movement);
