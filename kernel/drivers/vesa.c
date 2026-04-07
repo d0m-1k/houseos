@@ -7,6 +7,10 @@ static vesa_mode_info_t* mode_info = (vesa_mode_info_t*)MODE_INFO_ADDR;
 static uint8_t* framebuffer = NULL;
 static bool initialized = false;
 static uint32_t bytes_per_pixel = 0;
+#ifndef CONFIG_VESA_ROTATION_DEG
+#define CONFIG_VESA_ROTATION_DEG 0
+#endif
+static uint32_t rotation_deg = (uint32_t)CONFIG_VESA_ROTATION_DEG;
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -38,14 +42,63 @@ bool vesa_is_initialized(void) {
     return initialized && framebuffer != NULL;
 }
 
+static uint32_t vesa_phys_width(void) {
+    return mode_info->width;
+}
+
+static uint32_t vesa_phys_height(void) {
+    return mode_info->height;
+}
+
+static uint32_t vesa_logical_width(void) {
+    if (!initialized) return 0;
+    if (rotation_deg == 90u || rotation_deg == 270u) return vesa_phys_height();
+    return vesa_phys_width();
+}
+
+static uint32_t vesa_logical_height(void) {
+    if (!initialized) return 0;
+    if (rotation_deg == 90u || rotation_deg == 270u) return vesa_phys_width();
+    return vesa_phys_height();
+}
+
+static void vesa_map_xy(uint32_t x, uint32_t y, uint32_t *px, uint32_t *py) {
+    uint32_t w = vesa_phys_width();
+    uint32_t h = vesa_phys_height();
+    switch (rotation_deg) {
+        case 90u:
+            *px = y;
+            *py = (h - 1u) - x;
+            break;
+        case 180u:
+            *px = (w - 1u) - x;
+            *py = (h - 1u) - y;
+            break;
+        case 270u:
+            *px = (w - 1u) - y;
+            *py = x;
+            break;
+        default:
+            *px = x;
+            *py = y;
+            break;
+    }
+}
+
 uint32_t vesa_calculate_pixel_offset(uint32_t x, uint32_t y) {
-    return y * mode_info->pitch + x * bytes_per_pixel;
+    uint32_t px = x;
+    uint32_t py = y;
+    vesa_map_xy(x, y, &px, &py);
+    return py * mode_info->pitch + px * bytes_per_pixel;
 }
 
 void vesa_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
-    if (!vesa_is_initialized() || x >= mode_info->width || y >= mode_info->height) return;
+    uint32_t px;
+    uint32_t py;
+    if (!vesa_is_initialized() || x >= vesa_logical_width() || y >= vesa_logical_height()) return;
+    vesa_map_xy(x, y, &px, &py);
     
-    uint32_t offset = vesa_calculate_pixel_offset(x, y);
+    uint32_t offset = py * mode_info->pitch + px * bytes_per_pixel;
     uint8_t* pixel = framebuffer + offset;
     
     switch (bytes_per_pixel) {
@@ -67,9 +120,12 @@ void vesa_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
 }
 
 uint32_t vesa_get_pixel(uint32_t x, uint32_t y) {
-    if (!vesa_is_initialized() || x >= mode_info->width || y >= mode_info->height) return 0;
+    uint32_t px;
+    uint32_t py;
+    if (!vesa_is_initialized() || x >= vesa_logical_width() || y >= vesa_logical_height()) return 0;
+    vesa_map_xy(x, y, &px, &py);
     
-    uint32_t offset = vesa_calculate_pixel_offset(x, y);
+    uint32_t offset = py * mode_info->pitch + px * bytes_per_pixel;
     uint8_t* pixel = framebuffer + offset;
     
     switch (bytes_per_pixel) {
@@ -85,15 +141,14 @@ void vesa_clear(uint32_t color) {
     if (!vesa_is_initialized()) return;
     
     uint32_t screen_size = mode_info->pitch * mode_info->height;
-    
-    if (bytes_per_pixel == 4) {
+    if (rotation_deg == 0u && bytes_per_pixel == 4) {
         uint32_t* fb = (uint32_t*)framebuffer;
         uint32_t count = screen_size / 4;
         
         for (uint32_t i = 0; i < count; i++) fb[i] = color;
     } else {
-        for (uint32_t y = 0; y < mode_info->height; y++) {
-            for (uint32_t x = 0; x < mode_info->width; x++) {
+        for (uint32_t y = 0; y < vesa_logical_height(); y++) {
+            for (uint32_t x = 0; x < vesa_logical_width(); x++) {
                 vesa_put_pixel(x, y, color);
             }
         }
@@ -101,14 +156,17 @@ void vesa_clear(uint32_t color) {
 }
 
 void vesa_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
+    uint32_t lw;
+    uint32_t lh;
+    uint32_t x_end;
+    uint32_t y_end;
     if (!vesa_is_initialized()) return;
-    
-    uint32_t x_end = MIN(x + w, mode_info->width);
-    uint32_t y_end = MIN(y + h, mode_info->height);
-    
-    if (x >= mode_info->width || y >= mode_info->height) return;
-    
-    if (bytes_per_pixel == 4) {
+    lw = vesa_logical_width();
+    lh = vesa_logical_height();
+    x_end = MIN(x + w, lw);
+    y_end = MIN(y + h, lh);
+    if (x >= lw || y >= lh) return;
+    if (rotation_deg == 0u && bytes_per_pixel == 4) {
         for (uint32_t cy = y; cy < y_end; cy++) {
             uint32_t* line = (uint32_t*)(framebuffer + vesa_calculate_pixel_offset(x, cy));
             uint32_t width = x_end - x;
@@ -226,59 +284,87 @@ void vesa_draw_triangle(uint32_t x1, uint32_t y1, uint32_t x2, uint32_t y2, uint
 }
 
 void vesa_copy_rect(uint32_t src_x, uint32_t src_y, uint32_t dst_x, uint32_t dst_y, uint32_t w, uint32_t h) {
+    uint32_t lw;
+    uint32_t lh;
+    uint32_t copy_w;
+    uint32_t copy_h;
     if (!vesa_is_initialized()) return;
-    
-    if (src_x >= mode_info->width || src_y >= mode_info->height ||
-        dst_x >= mode_info->width || dst_y >= mode_info->height) return;
-    
-    uint32_t copy_w = MIN(w, mode_info->width - MAX(src_x, dst_x));
-    uint32_t copy_h = MIN(h, mode_info->height - MAX(src_y, dst_y));
-    
+    lw = vesa_logical_width();
+    lh = vesa_logical_height();
+    if (src_x >= lw || src_y >= lh || dst_x >= lw || dst_y >= lh) return;
+    copy_w = MIN(w, lw - MAX(src_x, dst_x));
+    copy_h = MIN(h, lh - MAX(src_y, dst_y));
     if (copy_w == 0 || copy_h == 0) return;
-    
-    for (uint32_t y = 0; y < copy_h; y++) {
-        uint32_t src_offset = vesa_calculate_pixel_offset(src_x, src_y + y);
-        uint32_t dst_offset = vesa_calculate_pixel_offset(dst_x, dst_y + y);
-        
-        memcpy(framebuffer + dst_offset, framebuffer + src_offset, copy_w * bytes_per_pixel);
+    if (rotation_deg == 0u) {
+        for (uint32_t y = 0; y < copy_h; y++) {
+            uint32_t src_offset = vesa_calculate_pixel_offset(src_x, src_y + y);
+            uint32_t dst_offset = vesa_calculate_pixel_offset(dst_x, dst_y + y);
+            memcpy(framebuffer + dst_offset, framebuffer + src_offset, copy_w * bytes_per_pixel);
+        }
+    } else {
+        for (uint32_t y = 0; y < copy_h; y++) {
+            for (uint32_t x = 0; x < copy_w; x++) {
+                uint32_t c = vesa_get_pixel(src_x + x, src_y + y);
+                vesa_put_pixel(dst_x + x, dst_y + y, c);
+            }
+        }
     }
 }
 
 void vesa_scroll(int32_t dx, int32_t dy, uint32_t fill_color) {
+    uint32_t lw;
+    uint32_t lh;
     if (!vesa_is_initialized() || (dx == 0 && dy == 0)) return;
+    lw = vesa_logical_width();
+    lh = vesa_logical_height();
     
     if (dx == 0) {
         uint32_t abs_dy = ABS(dy);
-        if ((uint32_t)abs_dy >= mode_info->height) {
+        if ((uint32_t)abs_dy >= lh) {
             vesa_clear(fill_color);
             return;
         }
-        
-        if (dy > 0) {
-            for (uint32_t y = mode_info->height - 1; y >= (uint32_t)dy; y--) {
-                memcpy(framebuffer + vesa_calculate_pixel_offset(0, y),
-                       framebuffer + vesa_calculate_pixel_offset(0, y - dy),
-                       mode_info->width * bytes_per_pixel);
+        if (rotation_deg == 0u) {
+            if (dy > 0) {
+                for (uint32_t y = lh - 1; y >= (uint32_t)dy; y--) {
+                    memcpy(framebuffer + vesa_calculate_pixel_offset(0, y),
+                           framebuffer + vesa_calculate_pixel_offset(0, y - dy),
+                           lw * bytes_per_pixel);
+                }
+            } else {
+                for (uint32_t y = 0; y < lh - abs_dy; y++) {
+                    memcpy(framebuffer + vesa_calculate_pixel_offset(0, y),
+                           framebuffer + vesa_calculate_pixel_offset(0, y + abs_dy),
+                           lw * bytes_per_pixel);
+                }
             }
         } else {
-            for (uint32_t y = 0; y < mode_info->height - abs_dy; y++) {
-                memcpy(framebuffer + vesa_calculate_pixel_offset(0, y),
-                       framebuffer + vesa_calculate_pixel_offset(0, y + abs_dy),
-                       mode_info->width * bytes_per_pixel);
+            if (dy > 0) {
+                for (uint32_t y = lh - 1; y >= (uint32_t)dy; y--) {
+                    for (uint32_t x = 0; x < lw; x++) {
+                        vesa_put_pixel(x, y, vesa_get_pixel(x, y - dy));
+                    }
+                }
+            } else {
+                for (uint32_t y = 0; y < lh - abs_dy; y++) {
+                    for (uint32_t x = 0; x < lw; x++) {
+                        vesa_put_pixel(x, y, vesa_get_pixel(x, y + abs_dy));
+                    }
+                }
             }
         }
         
-        if (dy > 0) vesa_fill_rect(0, 0, mode_info->width, dy, fill_color);
-        else vesa_fill_rect(0, mode_info->height - abs_dy, mode_info->width, abs_dy, fill_color);
+        if (dy > 0) vesa_fill_rect(0, 0, lw, dy, fill_color);
+        else vesa_fill_rect(0, lh - abs_dy, lw, abs_dy, fill_color);
     }
 }
 
 uint32_t vesa_get_width(void) {
-    return initialized ? mode_info->width : 0;
+    return vesa_logical_width();
 }
 
 uint32_t vesa_get_height(void) {
-    return initialized ? mode_info->height : 0;
+    return vesa_logical_height();
 }
 
 uint32_t vesa_get_pitch(void) {

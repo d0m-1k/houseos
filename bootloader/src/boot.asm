@@ -9,16 +9,20 @@ CFG_INITRAMFS_SIZE      equ 20
 CFG_INITRAMFS_LBA       equ 24
 CFG_INITRAMFS_ADDR      equ 28
 CFG_MEMMAP_ADDR         equ 32
-CFG_VESA_MODE           equ 36
-CFG_VESA_INFO_ADDR      equ 40
-CFG_VESA_MODE_INFO_ADDR equ 44
-CFG_STAGE2_LBA          equ 48
-CFG_STAGE2_SECTORS      equ 52
-CFG_FLAGS               equ 56
-CFG_ROOTFS_LBA          equ 60
-CFG_ROOTFS_SIZE         equ 64
+CFG_VIDEO_OUTPUT        equ 36
+CFG_VESA_MODE           equ 38
+CFG_VGA_MODE            equ 40
+CFG_VESA_INFO_ADDR      equ 44
+CFG_VESA_MODE_INFO_ADDR equ 48
+CFG_VESA_MODES_ADDR     equ 52
+CFG_STAGE2_LBA          equ 56
+CFG_STAGE2_SECTORS      equ 60
+CFG_FLAGS               equ 64
+CFG_ROOTFS_LBA          equ 68
+CFG_ROOTFS_SIZE         equ 72
 
 CFG_FLAG_DEBUG          equ 1
+CFG_FLAG_DYNAMIC_PARAMS equ 2
 LOAD_BOUNCE_ADDR        equ 0x3000
 
 _start:
@@ -54,7 +58,9 @@ _start:
     cmp eax, CFG_MAGIC
     jne .cfg_error
 
-    test dword [cfg_base + CFG_FLAGS], CFG_FLAG_DEBUG
+    mov eax, [cfg_base + CFG_FLAGS]
+    mov [boot_flags], eax
+    test dword [boot_flags], CFG_FLAG_DEBUG
     jz .no_dbg
     mov byte [debug_enabled], 1
 .no_dbg:
@@ -77,8 +83,15 @@ _start:
     mov [vesa_mode_info_off], ax
     mov [vesa_mode_info_seg], dx
 
+    test dword [boot_flags], CFG_FLAG_DYNAMIC_PARAMS
+    jz .keep_static_video
+    mov ax, [cfg_base + CFG_VIDEO_OUTPUT]
+    mov [video_output_value], ax
     mov ax, [cfg_base + CFG_VESA_MODE]
     mov [vesa_mode_value], ax
+    mov ax, [cfg_base + CFG_VGA_MODE]
+    mov [vga_mode_value], ax
+.keep_static_video:
 
     mov dword [pm_entry_addr], 0x00010000
 
@@ -106,9 +119,15 @@ _start:
     call dbg_print
     call get_memory_map
 
-    mov si, msg_vesa
+    mov si, msg_video
     call dbg_print
+    cmp word [video_output_value], 1
+    je .video_vga
     call vesa_load
+    jnc .video_ok
+.video_vga:
+    call vga_set_mode
+.video_ok:
 
     mov si, msg_pm
     call dbg_print
@@ -262,6 +281,7 @@ dbg_print:
 %include "gdt.asm"
 %include "memory.asm"
 %include "vesa.asm"
+%include "vga.asm"
 %include "a20.asm"
 %include "modes.asm"
 
@@ -282,6 +302,9 @@ dap_start_lba:
 
 boot_drive:          db 0
 debug_enabled:       db 0
+boot_flags:          dd 0
+video_output_value:  dw 1
+vga_mode_value:      dw 0x03
 
 memmap_addr:         dd 0x5000
 memmap_seg:          dw 0
@@ -310,7 +333,7 @@ disk_kernel_err_msg:       db "Kernel read error! Code: ", 0
 msg_load_kernel:           db "ST2: load kernel", 0x0D, 0x0A, 0
 msg_load_initramfs:        db "ST2: load initramfs", 0x0D, 0x0A, 0
 msg_memmap:                db "ST2: memorymap", 0x0D, 0x0A, 0
-msg_vesa:                  db "ST2: vesa", 0x0D, 0x0A, 0
+msg_video:                 db "ST2: video", 0x0D, 0x0A, 0
 msg_a20:                   db "ST2: a20", 0x0D, 0x0A, 0
 msg_pm:                    db "ST2: pm", 0x0D, 0x0A, 0
 

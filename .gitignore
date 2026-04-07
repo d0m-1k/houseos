@@ -14,3 +14,7 @@ initramfs/data/bin/*
 *.o
 *.log
 *.tmp
+.config
+.config.old
+include/config/auto.conf
+include/generated/autoconf.h

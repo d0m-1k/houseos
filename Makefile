@@ -1,8 +1,23 @@
 BUILD_DIR = build
 ASM = nasm
 
+KCONFIG_FILE ?= .config
+KCONFIG_DEFCONFIG ?= configs/houseos_defconfig
+KCONFIG_ROOT ?= Kconfig
+KCONFIG_CONF ?= /usr/bin/kconfig-conf
+KCONFIG_MCONF ?= /usr/bin/kconfig-mconf
+AUTO_CONF ?= include/config/auto.conf
+AUTO_HEADER ?= include/generated/autoconf.h
+
+-include $(KCONFIG_FILE)
+-include $(AUTO_CONF)
+
+define cfg_bool
+$(strip $(if $(filter y,$(CONFIG_$(1))),y,$(if $(shell grep -q '^# CONFIG_$(1) is not set' $(KCONFIG_FILE) 2>/dev/null && echo yes),n,)))
+endef
+
 SYSTEM_IMG = $(BUILD_DIR)/system.img
-IMG_SECTORS = 131072
+IMG_SECTORS ?= $(CONFIG_IMG_SECTORS)
 STAGE2_SECTORS = 8
 CFG_SECTOR = 1
 STAGE2_START = 2
@@ -14,22 +29,223 @@ ROOTFS_START = 32769
 ROOTFS_SECTORS = 245760
 DATAFS_START = 278529
 DATAFS_SECTORS = 245759
-BOOT_FLAGS ?= 1
-APPLET_PROFILE ?= core
-INITRAMFS_LOAD_ADDR ?= 0x00100000
-APPLETS_core = echo printf pwd ls cat grep mkdir touch rm rmdir cp mv ln tee reboot poweroff mount umount
-APPLETS_full = echo printf hexdump pwd ls cat grep less mkdir mkfifo mksock touch rm rmdir cp mv ln tee chvt ttyinfo kbdinfo mouseinfo reboot poweroff mount umount lsblk udp bootloader vesa vga
-CMD_APPLETS = $(APPLETS_$(APPLET_PROFILE))
+BOOT_FLAGS_EXTRA ?= $(CONFIG_BOOT_FLAGS_EXTRA)
+INITRAMFS_LOAD_ADDR ?= $(CONFIG_INITRAMFS_LOAD_ADDR)
+CONFIG_PS2_KEYBOARD := $(call cfg_bool,PS2_KEYBOARD)
+CONFIG_PS2_MOUSE := $(call cfg_bool,PS2_MOUSE)
+CONFIG_GRAPHICS_BACKEND_VGA := $(call cfg_bool,GRAPHICS_BACKEND_VGA)
+CONFIG_GRAPHICS_BACKEND_VESA := $(call cfg_bool,GRAPHICS_BACKEND_VESA)
+CONFIG_VESA_ROTATION_90 := $(call cfg_bool,VESA_ROTATION_90)
+CONFIG_VESA_ROTATION_180 := $(call cfg_bool,VESA_ROTATION_180)
+CONFIG_VESA_ROTATION_270 := $(call cfg_bool,VESA_ROTATION_270)
+CONFIG_GSHELL := $(call cfg_bool,GSHELL)
+CONFIG_BOOT_DYNAMIC_PARAMS := $(call cfg_bool,BOOT_DYNAMIC_PARAMS)
+CONFIG_BOOT_DEBUG := $(call cfg_bool,BOOT_DEBUG)
+CONFIG_DEBUG_KERNEL_SERIAL_LOG := $(call cfg_bool,DEBUG_KERNEL_SERIAL_LOG)
+CONFIG_KERNEL_FS_DEVFS := $(call cfg_bool,KERNEL_FS_DEVFS)
+CONFIG_KERNEL_FS_PROCFS := $(call cfg_bool,KERNEL_FS_PROCFS)
+CONFIG_KERNEL_FS_FAT32 := $(call cfg_bool,KERNEL_FS_FAT32)
+QEMU_MEM ?= $(patsubst "%",%,$(CONFIG_QEMU_MEM))
+QEMU_SERIAL ?= $(patsubst "%",%,$(CONFIG_QEMU_SERIAL))
+CONFIG_APPLET_ECHO ?= y
+CONFIG_APPLET_PRINTF ?= y
+CONFIG_APPLET_HEXDUMP ?= n
+CONFIG_APPLET_PWD ?= y
+CONFIG_APPLET_LS ?= y
+CONFIG_APPLET_CAT ?= y
+CONFIG_APPLET_GREP ?= y
+CONFIG_APPLET_LESS ?= n
+CONFIG_APPLET_MKDIR ?= y
+CONFIG_APPLET_MKFIFO ?= n
+CONFIG_APPLET_MKSOCK ?= n
+CONFIG_APPLET_TOUCH ?= y
+CONFIG_APPLET_RM ?= y
+CONFIG_APPLET_RMDIR ?= y
+CONFIG_APPLET_CP ?= y
+CONFIG_APPLET_MV ?= y
+CONFIG_APPLET_LN ?= y
+CONFIG_APPLET_TEE ?= y
+CONFIG_APPLET_CHVT ?= n
+CONFIG_APPLET_TTYINFO ?= n
+CONFIG_APPLET_KBDINFO ?= n
+CONFIG_APPLET_MOUSEINFO ?= n
+CONFIG_APPLET_REBOOT ?= y
+CONFIG_APPLET_POWEROFF ?= y
+CONFIG_APPLET_MOUNT ?= y
+CONFIG_APPLET_UMOUNT ?= y
+CONFIG_APPLET_LSBLK ?= n
+CONFIG_APPLET_UDP ?= n
+CONFIG_APPLET_BOOTLOADER ?= n
+CONFIG_APPLET_VESA ?= n
+CONFIG_APPLET_VGA ?= n
 
-ifeq ($(strip $(CMD_APPLETS)),)
-$(error Unsupported APPLET_PROFILE='$(APPLET_PROFILE)'. Use core or full)
+CMD_APPLETS = \
+	$(if $(filter y,$(CONFIG_APPLET_ECHO)),echo) \
+	$(if $(filter y,$(CONFIG_APPLET_PRINTF)),printf) \
+	$(if $(filter y,$(CONFIG_APPLET_HEXDUMP)),hexdump) \
+	$(if $(filter y,$(CONFIG_APPLET_PWD)),pwd) \
+	$(if $(filter y,$(CONFIG_APPLET_LS)),ls) \
+	$(if $(filter y,$(CONFIG_APPLET_CAT)),cat) \
+	$(if $(filter y,$(CONFIG_APPLET_GREP)),grep) \
+	$(if $(filter y,$(CONFIG_APPLET_LESS)),less) \
+	$(if $(filter y,$(CONFIG_APPLET_MKDIR)),mkdir) \
+	$(if $(filter y,$(CONFIG_APPLET_MKFIFO)),mkfifo) \
+	$(if $(filter y,$(CONFIG_APPLET_MKSOCK)),mksock) \
+	$(if $(filter y,$(CONFIG_APPLET_TOUCH)),touch) \
+	$(if $(filter y,$(CONFIG_APPLET_RM)),rm) \
+	$(if $(filter y,$(CONFIG_APPLET_RMDIR)),rmdir) \
+	$(if $(filter y,$(CONFIG_APPLET_CP)),cp) \
+	$(if $(filter y,$(CONFIG_APPLET_MV)),mv) \
+	$(if $(filter y,$(CONFIG_APPLET_LN)),ln) \
+	$(if $(filter y,$(CONFIG_APPLET_TEE)),tee) \
+	$(if $(filter y,$(CONFIG_APPLET_CHVT)),chvt) \
+	$(if $(filter y,$(CONFIG_APPLET_TTYINFO)),ttyinfo) \
+	$(if $(filter y,$(CONFIG_APPLET_KBDINFO)),kbdinfo) \
+	$(if $(filter y,$(CONFIG_APPLET_MOUSEINFO)),mouseinfo) \
+	$(if $(filter y,$(CONFIG_APPLET_REBOOT)),reboot) \
+	$(if $(filter y,$(CONFIG_APPLET_POWEROFF)),poweroff) \
+	$(if $(filter y,$(CONFIG_APPLET_MOUNT)),mount) \
+	$(if $(filter y,$(CONFIG_APPLET_UMOUNT)),umount) \
+	$(if $(filter y,$(CONFIG_APPLET_LSBLK)),lsblk) \
+	$(if $(filter y,$(CONFIG_APPLET_UDP)),udp) \
+	$(if $(filter y,$(CONFIG_APPLET_BOOTLOADER)),bootloader) \
+	$(if $(filter y,$(CONFIG_APPLET_VESA)),vesa) \
+	$(if $(filter y,$(CONFIG_APPLET_VGA)),vga)
+
+IMG_SECTORS ?= 131072
+BOOT_FLAGS_EXTRA ?= 0x0
+INITRAMFS_LOAD_ADDR ?= 0x00100000
+CONFIG_PS2_KEYBOARD ?= y
+CONFIG_PS2_MOUSE ?= y
+CONFIG_GSHELL ?= n
+CONFIG_KERNEL_FS_DEVFS ?= y
+CONFIG_KERNEL_FS_PROCFS ?= y
+CONFIG_KERNEL_FS_FAT32 ?= y
+QEMU_MEM ?= 4G
+QEMU_SERIAL ?= stdio
+VGA_MODE ?= $(CONFIG_GRAPHICS_VGA_MODE)
+VESA_MODE ?= $(CONFIG_GRAPHICS_VESA_MODE)
+VGA_MODE ?= 0x03
+VESA_MODE ?= 0x0118
+
+ifeq ($(strip $(BOOT_FLAGS_EXTRA)),)
+BOOT_FLAGS_EXTRA := 0x0
+endif
+ifeq ($(strip $(CONFIG_PS2_KEYBOARD)),)
+CONFIG_PS2_KEYBOARD := y
+endif
+ifeq ($(strip $(CONFIG_PS2_MOUSE)),)
+CONFIG_PS2_MOUSE := y
+endif
+ifeq ($(strip $(CONFIG_GSHELL)),)
+CONFIG_GSHELL := n
+endif
+ifeq ($(strip $(CONFIG_KERNEL_FS_DEVFS)),)
+CONFIG_KERNEL_FS_DEVFS := y
+endif
+ifeq ($(strip $(CONFIG_KERNEL_FS_PROCFS)),)
+CONFIG_KERNEL_FS_PROCFS := y
+endif
+ifeq ($(strip $(CONFIG_KERNEL_FS_FAT32)),)
+CONFIG_KERNEL_FS_FAT32 := y
+endif
+ifeq ($(strip $(CONFIG_GRAPHICS_BACKEND_VGA)),)
+CONFIG_GRAPHICS_BACKEND_VGA := y
+endif
+ifeq ($(strip $(CONFIG_GRAPHICS_BACKEND_VESA)),)
+CONFIG_GRAPHICS_BACKEND_VESA := n
+endif
+ifeq ($(strip $(CONFIG_BOOT_DYNAMIC_PARAMS)),)
+CONFIG_BOOT_DYNAMIC_PARAMS := y
+endif
+ifeq ($(strip $(CONFIG_BOOT_DEBUG)),)
+CONFIG_BOOT_DEBUG := n
+endif
+ifeq ($(strip $(CONFIG_DEBUG_KERNEL_SERIAL_LOG)),)
+CONFIG_DEBUG_KERNEL_SERIAL_LOG := y
+endif
+ifeq ($(strip $(VGA_MODE)),)
+VGA_MODE := 0x03
+endif
+ifeq ($(strip $(VESA_MODE)),)
+VESA_MODE := 0x0118
 endif
 
-.PHONY: all clean run debug
+VIDEO_OUTPUT := $(if $(filter y,$(CONFIG_GRAPHICS_BACKEND_VESA)),0,1)
+VESA_ROTATION_DEG := 0
+ifeq ($(CONFIG_VESA_ROTATION_90),y)
+VESA_ROTATION_DEG := 90
+endif
+ifeq ($(CONFIG_VESA_ROTATION_180),y)
+VESA_ROTATION_DEG := 180
+endif
+ifeq ($(CONFIG_VESA_ROTATION_270),y)
+VESA_ROTATION_DEG := 270
+endif
+
+BOOT_DYNAMIC_FLAG := $(if $(filter y,$(CONFIG_BOOT_DYNAMIC_PARAMS)),0x2,0x0)
+BOOT_DEBUG_FLAG := $(if $(filter y,$(CONFIG_BOOT_DEBUG)),0x1,0x0)
+BOOT_FLAGS ?= $(shell printf '0x%X' $$(( ($(BOOT_FLAGS_EXTRA)) | ($(BOOT_DYNAMIC_FLAG)) | ($(BOOT_DEBUG_FLAG)) )))
+
+ifeq ($(strip $(CMD_APPLETS)),)
+$(error No applets selected. Enable at least one APPLET_* option in .config/menuconfig)
+endif
+
+.PHONY: all clean run debug config defconfig oldconfig olddefconfig menuconfig savedefconfig printconfig syncconfig auto-files
 
 all: $(SYSTEM_IMG)
 
-$(SYSTEM_IMG): $(BUILD_DIR)/bootloader $(BUILD_DIR)/programs $(BUILD_DIR)/initramfs $(BUILD_DIR)/kernel | $(BUILD_DIR)
+config: oldconfig
+
+defconfig:
+	@cp $(KCONFIG_DEFCONFIG) $(KCONFIG_FILE)
+	@KCONFIG_CONFIG=$(KCONFIG_FILE) $(KCONFIG_CONF) --olddefconfig $(KCONFIG_ROOT)
+	@$(MAKE) --no-print-directory auto-files
+
+oldconfig:
+	@KCONFIG_CONFIG=$(KCONFIG_FILE) $(KCONFIG_CONF) --oldconfig $(KCONFIG_ROOT)
+	@$(MAKE) --no-print-directory auto-files
+
+olddefconfig:
+	@KCONFIG_CONFIG=$(KCONFIG_FILE) $(KCONFIG_CONF) --olddefconfig $(KCONFIG_ROOT)
+	@$(MAKE) --no-print-directory auto-files
+
+syncconfig: olddefconfig
+
+menuconfig:
+	@if [ ! -t 0 ] || [ ! -t 1 ]; then \
+		echo "menuconfig requires an interactive TTY"; \
+		exit 1; \
+	fi
+	@KCONFIG_CONFIG=$(KCONFIG_FILE) $(KCONFIG_MCONF) $(KCONFIG_ROOT)
+	@$(MAKE) --no-print-directory auto-files
+
+savedefconfig:
+	@KCONFIG_CONFIG=$(KCONFIG_FILE) $(KCONFIG_CONF) --savedefconfig $(KCONFIG_DEFCONFIG) $(KCONFIG_ROOT)
+
+printconfig:
+	@cat $(KCONFIG_FILE)
+
+auto-files: $(KCONFIG_FILE)
+	@mkdir -p $(dir $(AUTO_CONF)) $(dir $(AUTO_HEADER))
+	@cp $(KCONFIG_FILE) $(AUTO_CONF)
+	@{ \
+		echo "/* Auto-generated from $(KCONFIG_FILE). */"; \
+		awk '\
+			/^CONFIG_[A-Za-z0-9_]+=y$$/ { \
+				key = $$0; sub(/=.*/, "", key); \
+				print "#define " key " 1"; \
+				next; \
+			} \
+			/^CONFIG_[A-Za-z0-9_]+=.*/ { \
+				key = $$0; sub(/=.*/, "", key); \
+				val = $$0; sub(/^[^=]*=/, "", val); \
+				print "#define " key " " val; \
+			} \
+		' $(KCONFIG_FILE); \
+	} > $(AUTO_HEADER)
+
+$(SYSTEM_IMG): syncconfig $(BUILD_DIR)/bootloader $(BUILD_DIR)/programs $(BUILD_DIR)/initramfs $(BUILD_DIR)/kernel | $(BUILD_DIR)
 	@echo "DD    $@"
 	@stage2_sz=$$(wc -c < $(BUILD_DIR)/st2.bin); \
 	if [ $$stage2_sz -gt $$((512 * $(STAGE2_SECTORS))) ]; then \
@@ -72,22 +288,25 @@ $(SYSTEM_IMG): $(BUILD_DIR)/bootloader $(BUILD_DIR)/programs $(BUILD_DIR)/initra
 		echo "ERROR image overflow: payload does not fit into $(IMG_SECTORS) sectors"; \
 		exit 1; \
 	fi; \
-	$(ASM) -f bin -I bootloader/src \
-		-D CFG_KERNEL_SIZE=$$kernel_sz \
-		-D CFG_KERNEL_LBA=$$kernel_lba \
-		-D CFG_KERNEL_ADDR=$$kernel_addr \
-		-D CFG_INITRAMFS_SIZE=$$init_sz \
-		-D CFG_INITRAMFS_LBA=$$init_lba \
-		-D CFG_INITRAMFS_ADDR=$$init_addr \
-		-D CFG_MEMMAP_ADDR=0x00005000 \
-		-D CFG_VESA_MODE=0x0118 \
-		-D CFG_VESA_INFO_ADDR=0x00009000 \
-		-D CFG_VESA_MODE_INFO_ADDR=0x00009100 \
-		-D CFG_STAGE2_LBA=$(STAGE2_START) \
-		-D CFG_STAGE2_SECTORS=$(STAGE2_SECTORS) \
-		-D CFG_FLAGS=$(BOOT_FLAGS) \
-		-D CFG_ROOTFS_LBA=$(ROOTFS_START) \
-		-D CFG_ROOTFS_SIZE=$$(( $(ROOTFS_SECTORS) * 512 )) \
+		$(ASM) -f bin -I bootloader/src \
+			-D CFG_KERNEL_SIZE=$$kernel_sz \
+			-D CFG_KERNEL_LBA=$$kernel_lba \
+			-D CFG_KERNEL_ADDR=$$kernel_addr \
+			-D CFG_INITRAMFS_SIZE=$$init_sz \
+			-D CFG_INITRAMFS_LBA=$$init_lba \
+			-D CFG_INITRAMFS_ADDR=$$init_addr \
+			-D CFG_MEMMAP_ADDR=0x00005000 \
+			-D CFG_VIDEO_OUTPUT=$(VIDEO_OUTPUT) \
+			-D CFG_VESA_MODE=$(VESA_MODE) \
+			-D CFG_VGA_MODE=$(VGA_MODE) \
+			-D CFG_VESA_INFO_ADDR=0x00009000 \
+			-D CFG_VESA_MODE_INFO_ADDR=0x00009100 \
+			-D CFG_VESA_MODES_ADDR=0x00000000 \
+			-D CFG_STAGE2_LBA=$(STAGE2_START) \
+			-D CFG_STAGE2_SECTORS=$(STAGE2_SECTORS) \
+			-D CFG_FLAGS=$(BOOT_FLAGS) \
+			-D CFG_ROOTFS_LBA=$(ROOTFS_START) \
+			-D CFG_ROOTFS_SIZE=$$(( $(ROOTFS_SECTORS) * 512 )) \
 		-D CFG_ROOT_DISK=0 \
 		bootloader/src/bootcfg.asm -o $(BUILD_DIR)/bootcfg.bin; \
 	dd if=/dev/zero of=$@ bs=512 count=$(IMG_SECTORS) 2>/dev/null; \
@@ -141,7 +360,16 @@ $(BUILD_DIR)/initramfs: $(BUILD_DIR)/programs | $(BUILD_DIR)
 
 $(BUILD_DIR)/kernel: | $(BUILD_DIR)
 	@echo "MAKE  kernel"
-	@$(MAKE) -C kernel
+	@$(MAKE) -C kernel \
+		CONFIG_XHCI=n CONFIG_USBKBD=n \
+		CONFIG_PS2_KEYBOARD=$(CONFIG_PS2_KEYBOARD) CONFIG_PS2_MOUSE=$(CONFIG_PS2_MOUSE) \
+		CONFIG_GSHELL=$(CONFIG_GSHELL) \
+		CONFIG_KERNEL_FS_DEVFS=$(CONFIG_KERNEL_FS_DEVFS) \
+		CONFIG_KERNEL_FS_PROCFS=$(CONFIG_KERNEL_FS_PROCFS) \
+		CONFIG_KERNEL_FS_FAT32=$(CONFIG_KERNEL_FS_FAT32) \
+		CONFIG_GFX_BACKEND=$(if $(filter y,$(CONFIG_GRAPHICS_BACKEND_VESA)),vesa,vga) \
+		CONFIG_VESA_ROTATION_DEG=$(VESA_ROTATION_DEG) \
+		CONFIG_DEBUG_KERNEL_SERIAL_LOG=$(CONFIG_DEBUG_KERNEL_SERIAL_LOG)
 	@cp kernel/build/kernel.bin $@.bin
 
 $(BUILD_DIR):
@@ -149,16 +377,17 @@ $(BUILD_DIR):
 
 run: $(SYSTEM_IMG)
 	@echo "QEMU  $@"
-	@qemu-system-i386 -drive format=raw,file=$(SYSTEM_IMG) -serial stdio -m 4G
+	@qemu-system-i386 -drive format=raw,file=$(SYSTEM_IMG) -serial $(QEMU_SERIAL) -m $(QEMU_MEM)
 
 debug: $(SYSTEM_IMG)
 	@echo "QEMU  $@"
 	@echo "Attach to system: target remote localhost:1234"
-	@qemu-system-i386 -drive format=raw,file=$(SYSTEM_IMG) -S -s -m 4G
+	@qemu-system-i386 -drive format=raw,file=$(SYSTEM_IMG) -S -s -serial $(QEMU_SERIAL) -m $(QEMU_MEM)
 
 clean:
 	@echo "CLEAN"
 	@$(MAKE) -C bootloader clean
 	@$(MAKE) -C programs clean
 	@$(MAKE) -C kernel clean
+	@rm -f $(AUTO_CONF) $(AUTO_HEADER)
 	@rm -rf $(BUILD_DIR)

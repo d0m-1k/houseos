@@ -57,6 +57,7 @@
 
 * `nasm`
 * `gcc` (i386 cross-compiler или мультилиб)
+* `kconfig-frontends` (`kconfig-conf`, `kconfig-mconf`, `kconfig-config2h`)
 * `make`
 * `qemu-system-i386`
 * `dd`
@@ -65,6 +66,16 @@
 
 ```bash
 make
+```
+
+Kconfig workflow:
+
+```bash
+make defconfig
+make oldconfig
+make olddefconfig
+make menuconfig
+make savedefconfig
 ```
 
 Это создаст:
@@ -81,11 +92,10 @@ build/system.img
 make run
 ```
 
-Size tuning for BIOS/stage2 preload:
+Configure enabled applets:
 
 ```bash
-make APPLET_PROFILE=core
-make APPLET_PROFILE=full
+make menuconfig   # Userland applets section
 ```
 
 ## Unix-like Compatibility Status

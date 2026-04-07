@@ -28,6 +28,35 @@
 #include <drivers/syscall.h>
 #include <devctl.h>
 
+#ifndef CONFIG_PS2_KEYBOARD
+#define CONFIG_PS2_KEYBOARD 1
+#endif
+#ifndef CONFIG_PS2_MOUSE
+#define CONFIG_PS2_MOUSE 1
+#endif
+#ifndef CONFIG_GFX_BACKEND_VESA
+#define CONFIG_GFX_BACKEND_VESA 0
+#endif
+#ifndef CONFIG_DEBUG_KERNEL_SERIAL_LOG
+#define CONFIG_DEBUG_KERNEL_SERIAL_LOG 1
+#endif
+#ifndef CONFIG_KERNEL_FS_DEVFS
+#define CONFIG_KERNEL_FS_DEVFS 1
+#endif
+#ifndef CONFIG_KERNEL_FS_PROCFS
+#define CONFIG_KERNEL_FS_PROCFS 1
+#endif
+#ifndef CONFIG_KERNEL_FS_FAT32
+#define CONFIG_KERNEL_FS_FAT32 1
+#endif
+
+#if CONFIG_DEBUG_KERNEL_SERIAL_LOG
+#define KSERIAL(msg) serial_write(SERIAL_COM1, msg)
+#else
+#define KSERIAL(msg) do { } while (0)
+#endif
+#define BOOT_FLAG_DYNAMIC_PARAMS 0x2u
+
 static memfs *fs = NULL;
 static devfs_t g_devfs;
 static vfs_t g_vfs;
@@ -105,12 +134,14 @@ static int vga_ioctl(void *ctx, uint32_t request, void *arg) {
     fb_ctx_t *vga = (fb_ctx_t*)ctx;
     if (!vga) return -1;
     if (request == DEV_IOCTL_VGA_GET_INFO) {
-        volatile uint8_t *bda_video_mode = (volatile uint8_t*)(uintptr_t)0x449;
+        const volatile void *bda_video_mode_ptr = (const volatile void*)(uintptr_t)0x00000449u;
+        uint8_t bda_mode = 0x03;
         dev_vga_info_t *out = (dev_vga_info_t*)arg;
         if (!out) return -1;
+        memcpy(&bda_mode, (const void*)bda_video_mode_ptr, sizeof(bda_mode));
         out->cols = VGA_WIDTH;
         out->rows = VGA_HEIGHT;
-        out->mode = (uint32_t)(*bda_video_mode);
+        out->mode = (uint32_t)bda_mode;
         out->address = (uint32_t)(uintptr_t)vga->base;
         out->size = vga->size;
         return 0;
@@ -193,33 +224,40 @@ void kmain(void) {
     uint32_t root_sel = 0;
     const char *root_disk = NULL;
     serial_init(SERIAL_COM1);
-    serial_write(SERIAL_COM1, "kmain: enter\n");
+    KSERIAL("kmain: enter\n");
 
-    serial_write(SERIAL_COM1, "kmain: gdt_init\n");
+    KSERIAL("kmain: gdt_init\n");
     gdt_init();
-    serial_write(SERIAL_COM1, "kmain: tss_init\n");
+    KSERIAL("kmain: tss_init\n");
     tss_init(0x00070000u);
 
-    serial_write(SERIAL_COM1, "kmain: vesa_init\n");
+    KSERIAL("kmain: video init\n");
+#if CONFIG_GFX_BACKEND_VESA
     vesa_ok = vesa_init() ? 1 : 0;
-    if (!vesa_ok) tty_klog("warn: using vga\n");
+    if (!vesa_ok) tty_klog("warn: vesa init failed, using vga\n");
+#else
+    vesa_ok = 0;
+#endif
 
-    serial_write(SERIAL_COM1, "kmain: idt_init\n");
+    KSERIAL("kmain: idt_init\n");
     idt_init();
-    serial_write(SERIAL_COM1, "kmain: mouse_init\n");
+    KSERIAL("kmain: input init\n");
+#if CONFIG_PS2_MOUSE
     mouse_init();
-    serial_write(SERIAL_COM1, "kmain: keyboard_init\n");
+#endif
+#if CONFIG_PS2_KEYBOARD
     keyboard_init();
-    serial_write(SERIAL_COM1, "kmain: mm_init\n");
+#endif
+    KSERIAL("kmain: mm_init\n");
     mm_init();
-    serial_write(SERIAL_COM1, "kmain: paging_init\n");
+    KSERIAL("kmain: paging_init\n");
     paging_init();
-    serial_write(SERIAL_COM1, "kmain: kmalloc_init\n");
+    KSERIAL("kmain: kmalloc_init\n");
     kmalloc_init();
-    serial_write(SERIAL_COM1, "kmain: timer_init\n");
+    KSERIAL("kmain: timer_init\n");
     timer_init();
 
-    serial_write(SERIAL_COM1, "kmain: memfs_create\n");
+    KSERIAL("kmain: memfs_create\n");
     fs = memfs_create(10 * 1024 * 1024);
     if (!fs) {
         tty_klog("kmain: memfs_create failed, halt\n");
@@ -233,14 +271,19 @@ void kmain(void) {
         tty_klog("kmain: vfs_register memfs failed, halt\n");
         panic_halt();
     }
+#if CONFIG_KERNEL_FS_FAT32
     if (vfs_register_fs(&g_vfs, "fat32", &g_fat32_vfs_ops) != 0) {
         tty_klog("kmain: vfs_register fat32 failed, halt\n");
         panic_halt();
     }
+#endif
+#if CONFIG_KERNEL_FS_PROCFS
     if (vfs_register_fs(&g_vfs, "procfs", &g_procfs_vfs_ops) != 0) {
         tty_klog("kmain: vfs_register procfs failed, halt\n");
         panic_halt();
     }
+#endif
+#if CONFIG_KERNEL_FS_DEVFS
     if (devfs_init(&g_devfs, 512 * 1024) == 0) {
         if (vfs_register_fs(&g_vfs, "devfs", &g_devfs_vfs_ops) != 0) {
             tty_klog("kmain: vfs_register devfs failed\n");
@@ -248,6 +291,7 @@ void kmain(void) {
     } else {
         tty_klog("kmain: devfs_init failed\n");
     }
+#endif
     if (vesa_ok && g_devfs.fs) {
         uint32_t fb_size = vesa_get_pitch() * vesa_get_height();
         g_fb_ctx.base = (uint8_t*)(uintptr_t)vesa_get_framebuffer();
@@ -273,14 +317,14 @@ void kmain(void) {
     memfs_create_dir(fs, "/proc");
 
     tty_init(fs, &g_devfs);
-    serial_write(SERIAL_COM1, "kmain: tty_init done\n");
+    KSERIAL("kmain: tty_init done\n");
     inputdev_init(&g_devfs);
-    serial_write(SERIAL_COM1, "kmain: inputdev_init done\n");
-    serial_write(SERIAL_COM1, "kmain: pty_init skipped\n");
+    KSERIAL("kmain: inputdev_init done\n");
+    KSERIAL("kmain: pty_init skipped\n");
     pci_init();
-    serial_write(SERIAL_COM1, "kmain: pci_init done\n");
+    KSERIAL("kmain: pci_init done\n");
     if (pci_devfs_init(&g_devfs) != 0) tty_klog("kmain: pci devfs init failed\n");
-    serial_write(SERIAL_COM1, "kmain: pci_devfs_init done\n");
+    KSERIAL("kmain: pci_devfs_init done\n");
     tty_klog("kmain: disk init...\n");
     disk_init(&g_devfs);
     tty_klog("kmain: storage init done\n");
@@ -289,7 +333,9 @@ void kmain(void) {
     memset(&g_rootfat, 0, sizeof(g_rootfat));
     memset(&g_datafat, 0, sizeof(g_datafat));
 
-    root_sel = bootloader_get_root_disk();
+#if CONFIG_KERNEL_FS_FAT32
+    if (bootloader_get_flags() & BOOT_FLAG_DYNAMIC_PARAMS) root_sel = bootloader_get_root_disk();
+    else root_sel = 0;
     if (root_sel == 1u) root_disk = "disk0";
 
     if (root_disk) {
@@ -321,11 +367,14 @@ void kmain(void) {
         tty_klog("kmain: vfs_set_root fat32 failed\n");
     }
 
+#endif
+
     if (!use_fat_root && vfs_set_root(&g_vfs, "memfs", fs) != 0) {
         tty_klog("kmain: vfs_set_root memfs failed, halt\n");
         panic_halt();
     }
 
+#if CONFIG_KERNEL_FS_PROCFS
     if (vfs_mkdir(&g_vfs, "/proc") != 0) {
         vfs_info_t proc_info;
         if (vfs_get_info(&g_vfs, "/proc", &proc_info) != 0 || proc_info.type != VFS_NODE_DIR) {
@@ -337,13 +386,17 @@ void kmain(void) {
     } else {
         (void)vfs_set_mount_source(&g_vfs, "/proc", "procfs");
     }
+#endif
+#if CONFIG_KERNEL_FS_DEVFS
     if (vfs_mkdir(&g_vfs, "/dev") != 0) {
         vfs_info_t dev_info;
         if (vfs_get_info(&g_vfs, "/dev", &dev_info) != 0 || dev_info.type != VFS_NODE_DIR) {
             tty_klog("kmain: ensure /dev failed\n");
         }
     }
+#endif
 
+#if CONFIG_KERNEL_FS_FAT32
     if (use_fat_root) {
         const char *data_disk = root_disk ? root_disk : "disk0";
         if (fat32_init_named(&g_datafat, data_disk, 3) == 0) {
@@ -360,6 +413,7 @@ void kmain(void) {
             }
         }
     }
+#endif
 
     g_root_fs_for_syscalls = &g_vfs;
     syscall_set_devfs_ctx(&g_devfs);

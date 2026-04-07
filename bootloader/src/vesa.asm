@@ -47,19 +47,23 @@ vesa_load:
     rep movsb
     pop es
     
+    clc
     ret
 
 .vesa_error:
     mov si, vesa_err_msg
     call print
+    stc
     ret
 .mode_error:
     mov si, mode_err_msg
     call print
+    stc
     ret
 .switch_error:
     mov si, switch_err_msg
     call print
+    stc
     ret
 
 vesa_err_msg: db "VESA error!", 0

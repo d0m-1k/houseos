@@ -1,0 +1,278 @@
+mainmenu "HouseOS Configuration"
+
+menu "Image build"
+
+config IMG_SECTORS
+    int "Disk image size (sectors)"
+    default 131072
+
+menu "Bootloader"
+
+config BOOT_DYNAMIC_PARAMS
+    bool "Enable dynamic boot parameters from /dev/bootloader"
+    default y
+
+config BOOT_DEBUG
+    bool "Enable stage2 debug messages"
+    default n
+
+config BOOT_FLAGS_EXTRA
+    hex "Extra boot flags bitmask"
+    default 0x0
+
+endmenu
+
+menu "Memory layout (advanced)"
+
+config INITRAMFS_LOAD_ADDR
+    hex "Initramfs load address"
+    default 0x00100000
+
+endmenu
+
+endmenu
+
+menu "Kernel"
+
+menu "File systems"
+
+config KERNEL_FS_DEVFS
+    bool "devfs"
+    default y
+
+config KERNEL_FS_PROCFS
+    bool "procfs"
+    default y
+
+config KERNEL_FS_FAT32
+    bool "fat32"
+    default y
+
+endmenu
+
+menu "Device drivers"
+
+config PS2_KEYBOARD
+    bool "PS/2 keyboard"
+    default y
+
+config PS2_MOUSE
+    bool "PS/2 mouse"
+    default y
+
+endmenu
+
+menu "Graphics"
+
+choice
+    prompt "Graphics backend"
+    default GRAPHICS_BACKEND_VGA
+
+config GRAPHICS_BACKEND_VGA
+    bool "VGA text mode"
+
+config GRAPHICS_BACKEND_VESA
+    bool "VESA framebuffer"
+
+endchoice
+
+config GRAPHICS_VGA_MODE
+    hex "VGA mode"
+    depends on GRAPHICS_BACKEND_VGA
+    default 0x03
+
+config GRAPHICS_VESA_MODE
+    hex "VESA mode"
+    depends on GRAPHICS_BACKEND_VESA
+    default 0x0118
+
+choice
+    prompt "VESA rotation"
+    depends on GRAPHICS_BACKEND_VESA
+    default VESA_ROTATION_0
+
+config VESA_ROTATION_0
+    bool "0 degrees"
+
+config VESA_ROTATION_90
+    bool "90 degrees"
+
+config VESA_ROTATION_180
+    bool "180 degrees"
+
+config VESA_ROTATION_270
+    bool "270 degrees"
+
+endchoice
+
+config GSHELL
+    bool "Graphical shell"
+    default n
+
+endmenu
+
+endmenu
+
+menu "Debug"
+
+config DEBUG_KERNEL_SERIAL_LOG
+    bool "Verbose kernel serial logs"
+    default y
+
+endmenu
+
+menu "Userland applets"
+
+menu "Files"
+
+config APPLET_PWD
+    bool "pwd"
+    default y
+
+config APPLET_LS
+    bool "ls"
+    default y
+
+config APPLET_CAT
+    bool "cat"
+    default y
+
+config APPLET_GREP
+    bool "grep"
+    default y
+
+config APPLET_LESS
+    bool "less"
+    default n
+
+config APPLET_MKDIR
+    bool "mkdir"
+    default y
+
+config APPLET_MKFIFO
+    bool "mkfifo"
+    default n
+
+config APPLET_MKSOCK
+    bool "mksock"
+    default n
+
+config APPLET_TOUCH
+    bool "touch"
+    default y
+
+config APPLET_RM
+    bool "rm"
+    default y
+
+config APPLET_RMDIR
+    bool "rmdir"
+    default y
+
+config APPLET_CP
+    bool "cp"
+    default y
+
+config APPLET_MV
+    bool "mv"
+    default y
+
+config APPLET_LN
+    bool "ln"
+    default y
+
+config APPLET_TEE
+    bool "tee"
+    default y
+
+config APPLET_MOUNT
+    bool "mount"
+    default y
+
+config APPLET_UMOUNT
+    bool "umount"
+    default y
+
+config APPLET_LSBLK
+    bool "lsblk"
+    default n
+
+endmenu
+
+menu "System"
+
+config APPLET_ECHO
+    bool "echo"
+    default y
+
+config APPLET_PRINTF
+    bool "printf"
+    default y
+
+config APPLET_HEXDUMP
+    bool "hexdump"
+    default n
+
+config APPLET_REBOOT
+    bool "reboot"
+    default y
+
+config APPLET_POWEROFF
+    bool "poweroff"
+    default y
+
+config APPLET_BOOTLOADER
+    bool "bootloader"
+    default n
+
+endmenu
+
+menu "Network"
+
+config APPLET_UDP
+    bool "udp"
+    default n
+
+endmenu
+
+menu "Display and input"
+
+config APPLET_CHVT
+    bool "chvt"
+    default n
+
+config APPLET_TTYINFO
+    bool "ttyinfo"
+    default n
+
+config APPLET_KBDINFO
+    bool "kbdinfo"
+    default n
+
+config APPLET_MOUSEINFO
+    bool "mouseinfo"
+    default n
+
+config APPLET_VESA
+    bool "vesa"
+    default n
+
+config APPLET_VGA
+    bool "vga"
+    default n
+
+endmenu
+
+endmenu
+
+menu "Run options"
+
+config QEMU_MEM
+    string "QEMU memory"
+    default "4G"
+
+config QEMU_SERIAL
+    string "QEMU serial"
+    default "stdio"
+
+endmenu
