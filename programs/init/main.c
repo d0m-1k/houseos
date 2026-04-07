@@ -50,6 +50,7 @@ static int g_have_vesa = 0;
 static int g_gui_fallback_started = 0;
 static int32_t g_gui_fallback_pid = -1;
 static void ensure_tty2_shell_fallback(void);
+static void poll_pause(uint32_t ms);
 
 static void log_tty0(const char *text) {
     int fd = open("/dev/tty/1", 0);
@@ -67,6 +68,26 @@ static void log_tty0(const char *text) {
 static void log_tty0_shell(const char *prefix, const char *tty, const char *suffix) {
     log_tty0(prefix);
     log_tty0(tty);
+    log_tty0(suffix);
+}
+
+static void log_tty0_u32(const char *prefix, uint32_t v, const char *suffix) {
+    char buf[16];
+    uint32_t n = 0;
+    if (v == 0) {
+        buf[n++] = '0';
+    } else {
+        char rev[16];
+        uint32_t rn = 0;
+        while (v > 0 && rn < sizeof(rev)) {
+            rev[rn++] = (char)('0' + (v % 10u));
+            v /= 10u;
+        }
+        while (rn > 0) buf[n++] = rev[--rn];
+    }
+    buf[n] = '\0';
+    log_tty0(prefix);
+    log_tty0(buf);
     log_tty0(suffix);
 }
 
@@ -176,16 +197,15 @@ static void load_defaults(void) {
     g_spawn_delay_ms = 10;
     g_poll_ms = 100;
     add_mount_cfg("devfs", "/dev");
-    add_daemon_cfg("/dev/tty/S0", "/bin/netd", "daemon");
-    add_daemon_cfg("/dev/tty/2", "/bin/gfxd", NULL);
-    add_daemon_cfg("/dev/tty/2", "/bin/composd", NULL);
-    add_daemon_cfg("/dev/tty/2", "/bin/wmgrd", NULL);
+    add_shell_cfg("/dev/tty/1", "/bin/sh");
+    add_shell_cfg("/dev/tty/2", "/bin/sh");
     add_shell_cfg("/dev/tty/3", "/bin/sh");
     add_shell_cfg("/dev/tty/4", "/bin/sh");
     add_shell_cfg("/dev/tty/5", "/bin/sh");
     add_shell_cfg("/dev/tty/6", "/bin/sh");
     add_shell_cfg("/dev/tty/7", "/bin/sh");
     add_shell_cfg("/dev/tty/8", "/bin/sh");
+    add_shell_cfg("/dev/tty/S0", "/bin/sh");
 }
 
 static void parse_init_conf_line(char *line) {
@@ -356,6 +376,10 @@ static void ensure_tty2_shell_fallback(void) {
     }
 }
 
+static void poll_pause(uint32_t ms) {
+    sleep(ms ? ms : 1u);
+}
+
 int main(void) {
     load_init_conf();
     load_fstab();
@@ -372,7 +396,7 @@ int main(void) {
     {
         int tfd = open("/dev/tty/1", 0);
         if (tfd >= 0) {
-            uint32_t idx = 2;
+            uint32_t idx = 1;
             (void)ioctl(tfd, DEV_IOCTL_TTY_SET_ACTIVE, &idx);
             close(tfd);
         }
@@ -454,6 +478,6 @@ int main(void) {
                 }
             }
         }
-        sleep(g_poll_ms);
+        poll_pause(g_poll_ms);
     }
 }

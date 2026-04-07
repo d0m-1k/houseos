@@ -15,8 +15,13 @@ typedef struct {
     uint32_t eflags;
     uint32_t eax, ecx, edx, ebx;
     uint32_t esp, ebp, esi, edi;
-    uint32_t es, cs, ss, ds, fs, gs;
-    uint32_t ldt;
+    uint16_t es; uint16_t _r_es;
+    uint16_t cs; uint16_t _r_cs;
+    uint16_t ss; uint16_t _r_ss;
+    uint16_t ds; uint16_t _r_ds;
+    uint16_t fs; uint16_t _r_fs;
+    uint16_t gs; uint16_t _r_gs;
+    uint16_t ldt; uint16_t _r_ldt;
     uint16_t trap;
     uint16_t iomap_base;
 } __attribute__((packed)) tss_entry_t;

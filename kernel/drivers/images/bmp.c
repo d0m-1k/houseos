@@ -1,4 +1,4 @@
-// bmp.c
+
 #include <drivers/images/bmp.h>
 #include <string.h>
 #include <asm/mm.h>
@@ -39,7 +39,7 @@ image_t* bmp_load(const uint8_t* data, size_t size) {
         comp = read_u32(dib + 16);
     } else return NULL;
     
-    // Разрешаем BI_RGB (0) и BI_BITFIELDS (3)
+    
     if (comp != 0 && comp != 3) return NULL;
     
     if (bpp != 24 && bpp != 32) return NULL;
@@ -92,7 +92,7 @@ image_t* bmp_load(const uint8_t* data, size_t size) {
             }
         }
     } else if (img->bpp == 32) {
-        // Читаем маски цветов для BI_BITFIELDS
+        
         uint32_t r_mask = 0, g_mask = 0, b_mask = 0, a_mask = 0;
         
         if (comp == 3) {
@@ -104,7 +104,7 @@ image_t* bmp_load(const uint8_t* data, size_t size) {
             }
         }
         
-        // Если маски не указаны, используем стандартные
+        
         if (r_mask == 0 && g_mask == 0 && b_mask == 0) {
             r_mask = 0x00FF0000;
             g_mask = 0x0000FF00;
@@ -112,8 +112,8 @@ image_t* bmp_load(const uint8_t* data, size_t size) {
             a_mask = 0xFF000000;
         }
         
-        // Простая конвертация: предполагаем, что порядок в памяти BGRA
-        // Для BI_BITFIELDS с нестандартными масками нужна дополнительная обработка
+        
+        
         for (uint32_t y = 0; y < img->height; y++) {
             uint8_t* row = img->data + y * img->pitch;
             for (uint32_t x = 0; x < img->width; x++) {

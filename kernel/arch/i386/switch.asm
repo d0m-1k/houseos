@@ -1,6 +1,6 @@
 global context_switch
 context_switch:
-    pushfd                 ; сохраняем EFLAGS
+    pushfd
     push eax
     push ecx
     push edx
@@ -9,11 +9,12 @@ context_switch:
     push esi
     push edi
 
-    mov eax, [esp + 36]    ; адрес prev->esp (после 8 push'ов + адрес возврата)
+    mov eax, [esp + 36]
+    mov edx, [esp + 40]
+    mov ecx, [esp + 44]
     mov [eax], esp
-
-    mov eax, [esp + 40]    ; адрес next->esp
-    mov esp, eax
+    mov cr3, ecx
+    mov esp, edx
 
     pop edi
     pop esi
@@ -22,5 +23,5 @@ context_switch:
     pop edx
     pop ecx
     pop eax
-    popfd                  ; восстанавливаем EFLAGS
+    popfd
     ret

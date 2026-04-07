@@ -9,7 +9,7 @@
 
 typedef void (*keyboard_hotkey_handler_t)(uint8_t keycode, bool pressed, bool shift, bool ctrl, bool alt);
 
-// Структура события клавиатуры
+
 struct key_event {
     uint8_t scancode;
     char ascii;
@@ -20,7 +20,7 @@ struct key_event {
     bool caps;
 };
 
-// Специальные клавиши
+
 enum key_spec {
     KEY_ESC          = 0x01,
     KEY_1            = 0x02,
@@ -77,15 +77,15 @@ enum key_spec {
 };
 
 static const char keyboard_map[LAYOUT_COUNT][2][255] = {
-    { // English (QWERTY)
-        { // without shift
+    { 
+        { 
             0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
             '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',
             0,  'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`', 
             0, '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0,
             '*', 0, ' ', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             '-', 0, 0, 0, '+', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        }, { // with shift
+        }, { 
             0, 27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\b',
             '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n',
             0,  'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '\"', '~',
@@ -97,26 +97,26 @@ static const char keyboard_map[LAYOUT_COUNT][2][255] = {
 };
 
 static const uint8_t ext_scancodes[] = {
-    0x1C,  // Enter (numpad)
-    0x35,  // / (numpad)
-    0x37,  // Print Screen
-    0x38,  // Right Alt
-    0x47,  // Home
-    0x48,  // Up
-    0x49,  // Page Up
-    0x4B,  // Left
-    0x4D,  // Right
-    0x4F,  // End
-    0x50,  // Down
-    0x51,  // Page Down
-    0x52,  // Insert
-    0x53,  // Delete
-    0x5B,  // Left Super
-    0x5C,  // Right Super
-    0x5D,  // Menu
-    0x5E,  // Power
-    0x5F,  // Sleep
-    0x63,  // Wake
+    0x1C,  
+    0x35,  
+    0x37,  
+    0x38,  
+    0x47,  
+    0x48,  
+    0x49,  
+    0x4B,  
+    0x4D,  
+    0x4F,  
+    0x50,  
+    0x51,  
+    0x52,  
+    0x53,  
+    0x5B,  
+    0x5C,  
+    0x5D,  
+    0x5E,  
+    0x5F,  
+    0x63,  
     0
 };
 

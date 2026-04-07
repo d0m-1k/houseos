@@ -858,8 +858,8 @@ static ssize_t fat32_write_op(void *fs_ctx, const char *path, const void *buf, s
         e.file_size = (uint32_t)size;
         if (fat32_write_dirent_at(fs, n.entry_rel_sector, n.entry_offset, &e) != 0) return -1;
     }
-    /* New contents are already committed (dir entry points to new chain). */
-    /* If old chain cleanup fails, keep success to avoid false write errors. */
+    
+    
     if (old_first >= 2) (void)fat32_free_chain(fs, old_first);
 
     return (ssize_t)size;

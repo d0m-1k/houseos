@@ -130,7 +130,6 @@ uint8_t *initramfs_get_archive_addr(void) {
 
     memset(&cfg, 0, sizeof(cfg));
     memcpy(&cfg, (const void*)(uintptr_t)BOOTCFG_ADDR, sizeof(cfg));
-
     if (cfg.magic == BOOTCFG_MAGIC && cfg.initramfs_addr != 0u) {
         uint8_t *from_cfg = (uint8_t*)(uintptr_t)cfg.initramfs_addr;
         if (cpio_magic_ok(from_cfg)) return from_cfg;
@@ -180,7 +179,7 @@ void initramfs_init(memfs *fs) {
         memcpy(name_buf, name, name_copy);
         name_buf[name_copy] = '\0';
         if (name_copy > 0 && name_buf[name_copy - 1] == '\0') {
-            /* already null-terminated by archive */
+            
         } else {
             name_buf[sizeof(name_buf) - 1] = '\0';
         }

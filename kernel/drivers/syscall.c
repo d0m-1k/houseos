@@ -51,6 +51,7 @@ enum {
 
 vfs_t *g_root_fs_for_syscalls = NULL;
 static void *g_devfs_ctx = NULL;
+volatile uint32_t g_in_syscall = 0;
 
 #define FD_MAX 32
 enum {
@@ -309,7 +310,7 @@ static int udp_recvfrom_socket(int sid, syscall_udp_recv_req_t *req) {
 }
 
 static int build_user_stack_from_cmdline(const char *cmdline, uint32_t *user_esp_out) {
-    char args[USER_ARG_MAX][USER_ARG_TOKEN];
+    char *args;
     uint32_t arg_ptr[USER_ARG_MAX];
     uint32_t argc = 0;
     uint32_t i = 0;
@@ -317,6 +318,9 @@ static int build_user_stack_from_cmdline(const char *cmdline, uint32_t *user_esp
 
     if (!user_esp_out) return -1;
     if (!cmdline) cmdline = "";
+    args = (char*)kmalloc(USER_ARG_MAX * USER_ARG_TOKEN);
+    if (!args) return -1;
+    memset(args, 0, USER_ARG_MAX * USER_ARG_TOKEN);
 
     while (cmdline[i]) {
         uint32_t tlen = 0;
@@ -325,7 +329,10 @@ static int build_user_stack_from_cmdline(const char *cmdline, uint32_t *user_esp
 
         while (cmdline[i] && is_space(cmdline[i])) i++;
         if (!cmdline[i]) break;
-        if (argc >= USER_ARG_MAX) return -1;
+        if (argc >= USER_ARG_MAX) {
+            kfree(args);
+            return -1;
+        }
 
         while (cmdline[i]) {
             char c = cmdline[i];
@@ -342,22 +349,32 @@ static int build_user_stack_from_cmdline(const char *cmdline, uint32_t *user_esp
                 i++;
                 continue;
             }
-            if (tlen + 1 >= USER_ARG_TOKEN) return -1;
-            args[argc][tlen++] = c;
+            if (tlen + 1 >= USER_ARG_TOKEN) {
+                kfree(args);
+                return -1;
+            }
+            args[argc * USER_ARG_TOKEN + tlen++] = c;
             i++;
         }
-        if (in_sq || in_dq) return -1;
-        args[argc][tlen] = '\0';
+        if (in_sq || in_dq) {
+            kfree(args);
+            return -1;
+        }
+        args[argc * USER_ARG_TOKEN + tlen] = '\0';
         argc++;
     }
 
     sp = USER_STACK_TOP & ~3u;
 
     for (int32_t a = (int32_t)argc - 1; a >= 0; a--) {
-        uint32_t len = (uint32_t)strlen(args[a]) + 1;
-        if (sp < USER_VADDR_BASE + len + 256) return -1;
+        char *arg = args + ((uint32_t)a * USER_ARG_TOKEN);
+        uint32_t len = (uint32_t)strlen(arg) + 1;
+        if (sp < USER_VADDR_BASE + len + 256) {
+            kfree(args);
+            return -1;
+        }
         sp -= len;
-        memcpy((void*)(uintptr_t)sp, args[a], len);
+        memcpy((void*)(uintptr_t)sp, arg, len);
         arg_ptr[a] = sp;
     }
 
@@ -371,6 +388,7 @@ static int build_user_stack_from_cmdline(const char *cmdline, uint32_t *user_esp
     sp -= 4;
     *(uint32_t*)(uintptr_t)sp = argc;
 
+    kfree(args);
     *user_esp_out = sp;
     return 0;
 }
@@ -613,7 +631,7 @@ static void spawned_user_task(void *arg) {
     }
 
     kfree(req);
-    jump_to_ring3(entry, user_esp, 0x202);
+    jump_to_user_image_compat(entry, user_esp);
     task_exit();
 }
 
@@ -701,6 +719,12 @@ uint32_t do_syscall_impl(
             if (elf_load_from_vfs(g_root_fs_for_syscalls, path, &entry) != 0) return (uint32_t)(-K_ENOENT);
             if (build_user_stack_from_cmdline(NULL, &user_esp) != 0) return (uint32_t)(-K_EINVAL);
 
+            if (f && ((f->cs & 3u) == 0u)) {
+                sti();
+                jump_to_user_image_compat(entry, user_esp);
+                __builtin_unreachable();
+            }
+            if (!f) return (uint32_t)(-K_EINVAL);
             f->ip = entry;
             f->sp = user_esp;
             return 0;
@@ -718,6 +742,12 @@ uint32_t do_syscall_impl(
             if (elf_load_from_vfs(g_root_fs_for_syscalls, path, &entry) != 0) return (uint32_t)(-K_ENOENT);
             if (build_user_stack_from_cmdline(cmdline, &user_esp) != 0) return (uint32_t)(-K_EINVAL);
 
+            if (f && ((f->cs & 3u) == 0u)) {
+                sti();
+                jump_to_user_image_compat(entry, user_esp);
+                __builtin_unreachable();
+            }
+            if (!f) return (uint32_t)(-K_EINVAL);
             f->ip = entry;
             f->sp = user_esp;
             return 0;
@@ -846,7 +876,7 @@ uint32_t do_syscall_impl(
             int32_t status = 0;
             int32_t r = task_waitpid((int32_t)ebx, ecx ? &status : NULL, edx);
             if (r < 0) return (uint32_t)(-K_ECHILD);
-            if (ecx) *(int32_t*)ecx = status;
+            if (ecx && (!f || ((f->cs & 3u) != 0u))) *(int32_t*)ecx = status;
             return (uint32_t)r;
         }
         case SYS_INIT_SPAWN_SHELLS: {
@@ -991,4 +1021,4 @@ uint32_t do_syscall_impl(
     }
 }
 
-/* syscall_handler is implemented in drivers/syscall_stub.asm */
+

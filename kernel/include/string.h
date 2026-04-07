@@ -1,6 +1,6 @@
 #pragma once
 
-// #include <stddef.h>
+
 #include <stdint.h>
 
 typedef uint32_t size_t;
@@ -23,8 +23,7 @@ void* memmove(void* dest, const void* src, size_t num);
 int memcmp(const void* ptr1, const void* ptr2, size_t num);
 void* memchr(const void* ptr, int value, size_t num);
 
-// char* strdup(const char* str);
-// char* strndup(const char* str, size_t n);
+
 size_t strspn(const char* str1, const char* str2);
 size_t strcspn(const char* str1, const char* str2);
 char* strpbrk(const char* str1, const char* str2);

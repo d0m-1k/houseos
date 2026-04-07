@@ -2,6 +2,7 @@
 #include <asm/mm.h>
 #include <asm/processor.h>
 #include <asm/tss.h>
+#include <asm/timer.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -20,7 +21,7 @@ task_t *_idle_task = NULL;
 static task_t *ready_head = NULL;
 static task_t *ready_tail = NULL;
 
-extern void context_switch(uint32_t *old_esp, uint32_t new_esp);
+extern void context_switch(uint32_t *old_esp, uint32_t new_esp, uint32_t new_cr3);
 
 static inline uint32_t get_esp(void) {
     uint32_t esp;
@@ -179,14 +180,17 @@ int task_create(void (*entry)(void*), void *arg) {
 }
 
 void task_yield(void) {
+    uint32_t flags;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(flags) :: "memory");
     cli();
     schedule();
-    sti();
+    if (flags & (1u << 9)) sti();
+    else cli();
 }
 
 void task_exit(void) {
     current_task->state = TASK_TERMINATED;
-    /* Cannot free the current kernel stack before switching away from it. */
+    
     schedule();
     while (1);
 }
@@ -221,8 +225,7 @@ void schedule(void) {
         if (prev->state == TASK_RUNNING) {
             prev->state = TASK_READY;
         }
-        mm_switch_cr3(current_task->cr3 ? current_task->cr3 : mm_kernel_cr3());
-        context_switch(&prev->esp, next->esp);
+        context_switch(&prev->esp, next->esp, (current_task->cr3 ? current_task->cr3 : mm_kernel_cr3()));
     } else {
         sti();
         hlt();

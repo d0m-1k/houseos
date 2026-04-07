@@ -1,4 +1,4 @@
-// images/image.h
+
 #pragma once
 
 #include <stdint.h>

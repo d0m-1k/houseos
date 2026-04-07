@@ -52,6 +52,14 @@ static uint32_t g_fg = 0x00D0D0D0;
 static uint32_t g_bg = 0x00000000;
 static uint8_t g_tty_ready = 0;
 
+static inline void tty_spin_wait(void) {
+    uint32_t flags;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(flags) :: "memory");
+    sti();
+    __asm__ __volatile__("hlt");
+    if ((flags & (1u << 9)) == 0u) cli();
+}
+
 static void tty_render_full(tty_device_t *tty);
 static void tty_draw_cell(uint32_t col, uint32_t row, char c);
 static const uint8_t *tty_fallback_glyph(char c);
@@ -315,7 +323,7 @@ static void tty_hotkey_handler(uint8_t keycode, bool pressed, bool shift, bool c
         return;
     }
 
-    if (ctrl && (shift || alt) && keycode >= KEY_F1 && keycode <= KEY_F8) {
+    if ((alt || (ctrl && shift)) && keycode >= KEY_F1 && keycode <= KEY_F8) {
         uint32_t idx = (uint32_t)(keycode - KEY_F1);
         tty_set_active(idx);
         return;
@@ -593,8 +601,8 @@ static ssize_t tty_vesa_read(void *ctx, void *buf, size_t size) {
 
     if (size == 1) {
         while (1) {
-            while (tty->index != g_active_tty) task_yield();
-            while (!keyboard_event_available() && !keyboard_available()) task_yield();
+            while (tty->index != g_active_tty) tty_spin_wait();
+            while (!keyboard_event_available() && !keyboard_available()) tty_spin_wait();
             if (tty->index != g_active_tty) continue;
 
             if (!keyboard_event_available() && keyboard_available()) {
@@ -641,10 +649,10 @@ static ssize_t tty_vesa_read(void *ctx, void *buf, size_t size) {
 
     while (n < (size - 1)) {
         while (tty->index != g_active_tty) {
-            task_yield();
+            tty_spin_wait();
         }
         while (!keyboard_event_available() && !keyboard_available()) {
-            task_yield();
+            tty_spin_wait();
         }
 
         if (tty->index != g_active_tty) continue;
@@ -867,8 +875,8 @@ static ssize_t tty_vga_read(void *ctx, void *buf, size_t size) {
 
     if (size == 1) {
         while (1) {
-            while (tty->index != g_active_tty) task_yield();
-            while (!keyboard_event_available() && !keyboard_available()) task_yield();
+            while (tty->index != g_active_tty) tty_spin_wait();
+            while (!keyboard_event_available() && !keyboard_available()) tty_spin_wait();
             if (tty->index != g_active_tty) continue;
 
             if (!keyboard_event_available() && keyboard_available()) {
@@ -911,10 +919,10 @@ static ssize_t tty_vga_read(void *ctx, void *buf, size_t size) {
 
     while (n < (size - 1)) {
         while (tty->index != g_active_tty) {
-            task_yield();
+            tty_spin_wait();
         }
         while (!keyboard_event_available() && !keyboard_available()) {
-            task_yield();
+            tty_spin_wait();
         }
         if (tty->index != g_active_tty) continue;
 
@@ -1021,7 +1029,7 @@ static int tty_vesa_ioctl(void *ctx, uint32_t request, void *arg) {
         uint32_t raw = *(uint32_t*)arg;
         uint32_t idx;
         if (raw >= 1 && raw <= VESA_TTY_COUNT) idx = raw - 1;
-        else if (raw < VESA_TTY_COUNT) idx = raw; /* legacy 0-based */
+        else if (raw < VESA_TTY_COUNT) idx = raw; 
         else return -1;
         tty_set_active(idx);
         return 0;
@@ -1063,11 +1071,7 @@ static ssize_t tty_serial_read(void *ctx, void *buf, size_t size) {
     port = g_serial_ports[tty->index];
 
     while (n < size) {
-        while (!serial_received(port)) {
-            sti();
-            hlt();
-            cli();
-        }
+        while (!serial_received(port)) tty_spin_wait();
         char c = serial_read_char(port);
         if (esc_state == 0 && c == 27) {
             esc_state = 1;

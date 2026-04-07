@@ -2,7 +2,7 @@ BUILD_DIR = build
 ASM = nasm
 
 SYSTEM_IMG = $(BUILD_DIR)/system.img
-IMG_SECTORS = 2880
+IMG_SECTORS = 131072
 STAGE2_SECTORS = 8
 CFG_SECTOR = 1
 STAGE2_START = 2
@@ -16,7 +16,7 @@ DATAFS_START = 278529
 DATAFS_SECTORS = 245759
 BOOT_FLAGS ?= 1
 APPLET_PROFILE ?= core
-INITRAMFS_LOAD_ADDR ?= 0x00090000
+INITRAMFS_LOAD_ADDR ?= 0x00100000
 APPLETS_core = echo printf pwd ls cat grep mkdir touch rm rmdir cp mv ln tee reboot poweroff mount umount
 APPLETS_full = echo printf hexdump pwd ls cat grep less mkdir mkfifo mksock touch rm rmdir cp mv ln tee chvt ttyinfo kbdinfo mouseinfo reboot poweroff mount umount lsblk udp bootloader vesa vga
 CMD_APPLETS = $(APPLETS_$(APPLET_PROFILE))
@@ -56,8 +56,12 @@ $(SYSTEM_IMG): $(BUILD_DIR)/bootloader $(BUILD_DIR)/programs $(BUILD_DIR)/initra
 		echo "ERROR initramfs overlaps kernel image: init_addr=$$(printf '0x%X' $$init_addr_num) kernel_end=$$(printf '0x%X' $$kernel_end)"; \
 		exit 1; \
 	fi; \
-	if [ $$init_end -gt $$((0x100000)) ]; then \
-		echo "ERROR initramfs exceeds low memory window: init_end=$$(printf '0x%X' $$init_end) > 0x100000"; \
+	if [ $$init_addr_num -lt $$((0xA0000)) ] && [ $$init_end -gt $$((0xA0000)) ]; then \
+		echo "ERROR initramfs overlaps VGA memory window: init_addr=$$(printf '0x%X' $$init_addr_num) init_end=$$(printf '0x%X' $$init_end)"; \
+		exit 1; \
+	fi; \
+	if [ $$init_end -gt $$((0x400000)) ]; then \
+		echo "ERROR initramfs exceeds early identity window: init_end=$$(printf '0x%X' $$init_end) > 0x400000"; \
 		exit 1; \
 	fi; \
 	p1_start=$(CFG_SECTOR); \
@@ -116,22 +120,16 @@ $(BUILD_DIR)/programs: | $(BUILD_DIR)
 	@cp programs/shell/shell.elf initramfs/data/bin/sh
 	@cp programs/cmd/cmd.elf initramfs/data/bin/cmd
 	@for app in $(CMD_APPLETS); do \
-		ln -f initramfs/data/bin/cmd initramfs/data/bin/$$app; \
+		cp -f initramfs/data/bin/cmd initramfs/data/bin/$$app; \
 	done
+	@if [ -d programs/build/initramfs/bin ]; then cp -a programs/build/initramfs/bin/. initramfs/data/bin/; fi
 	@if [ -d programs/build/initramfs/lib ]; then cp -a programs/build/initramfs/lib/. initramfs/data/lib/; fi
 	@strip -s initramfs/data/bin/init initramfs/data/bin/sh initramfs/data/bin/cmd 2>/dev/null || true
 	@for app in $(CMD_APPLETS); do \
 		strip -s initramfs/data/bin/$$app 2>/dev/null || true; \
 	done
-	@rm -f initramfs/data/bin/settings
-	@rm -f initramfs/data/bin/guishell
-	@rm -f initramfs/data/bin/taskmgr
-	@rm -f initramfs/data/lib/libhstd.so initramfs/data/lib/libhgui.so
 	@cp programs/init/init.conf initramfs/data/etc/init.conf
 	@cp programs/init/fstab initramfs/data/etc/fstab
-	@rm -f initramfs/data/bin/evwatch initramfs/data/bin/fbinfo initramfs/data/bin/cad initramfs/data/bin/gui initramfs/data/bin/shell \
-		initramfs/data/bin/fb_demo initramfs/data/bin/netd initramfs/data/bin/default8x16.psf initramfs/data/bin/gfxd \
-		initramfs/data/bin/terminal initramfs/data/bin/composd initramfs/data/bin/wmgrd
 	@rm -f initramfs/data/lib/*.a initramfs/data/lib/*.o initramfs/data/lib/*.elf
 	@touch $@
 

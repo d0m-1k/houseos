@@ -37,7 +37,8 @@ int cmd_cp(int argc, char **argv, int arg0, const char *cwd) {
         return 1;
     }
 
-    while ((n = read(in_fd, buf, sizeof(buf))) > 0) {
+    n = read(in_fd, buf, sizeof(buf));
+    if (n > 0) {
         int32_t wr = first ? write(out_fd, buf, (uint32_t)n) : append(out_fd, buf, (uint32_t)n);
         if (wr != n) {
             close(out_fd);

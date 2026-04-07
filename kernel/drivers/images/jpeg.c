@@ -1,8 +1,8 @@
-// images/jpeg.c
+
 #include <drivers/images/jpeg.h>
 #include <string.h>
 
-// Проверка сигнатуры JPEG
+
 bool jpeg_verify(const uint8_t* data, size_t size) {
     if (size < 2) return false;
     
@@ -10,6 +10,6 @@ bool jpeg_verify(const uint8_t* data, size_t size) {
 }
 
 image_t* jpeg_load(const uint8_t* data, size_t size) {
-    // TODO: Реализовать JPEG парсер
+    
     return NULL;
 }

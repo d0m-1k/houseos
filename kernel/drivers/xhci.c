@@ -10,13 +10,13 @@
 #define XHCI_CMD_TRBS 64
 #define XHCI_EVT_TRBS 64
 
-/* PCI config space */
+
 #define PCI_CMD_OFFSET 0x04
 #define PCI_CMD_IO     (1u << 0)
 #define PCI_CMD_MEM    (1u << 1)
 #define PCI_CMD_BME    (1u << 2)
 
-/* xHCI capability registers */
+
 #define XHCI_CAPLENGTH   0x00
 #define XHCI_HCIVERSION  0x02
 #define XHCI_HCSPARAMS1  0x04
@@ -24,7 +24,7 @@
 #define XHCI_DBOFF       0x14
 #define XHCI_RTSOFF      0x18
 
-/* xHCI operational registers */
+
 #define XHCI_USBCMD      0x00
 #define XHCI_USBSTS      0x04
 #define XHCI_CRCR_LO     0x18
@@ -35,7 +35,7 @@
 #define XHCI_PORTSC_BASE 0x400
 #define XHCI_PORT_STRIDE 0x10
 
-/* xHCI runtime/interrupter registers */
+
 #define XHCI_IR0_BASE    0x20
 #define XHCI_IR_IMAN     0x00
 #define XHCI_IR_ERSTSZ   0x08
@@ -44,24 +44,24 @@
 #define XHCI_IR_ERDP_LO   0x18
 #define XHCI_IR_ERDP_HI   0x1C
 
-/* USBCMD / USBSTS bits */
+
 #define XHCI_USBCMD_RUNSTOP (1u << 0)
 #define XHCI_USBCMD_HCRST   (1u << 1)
 #define XHCI_USBSTS_HCH     (1u << 0)
 
-/* PORTSC bits */
+
 #define XHCI_PORTSC_CCS     (1u << 0)
 #define XHCI_PORTSC_PED     (1u << 1)
 #define XHCI_PORTSC_OCA     (1u << 3)
 #define XHCI_PORTSC_PR      (1u << 4)
 #define XHCI_PORTSC_PP      (1u << 9)
 
-/* xHCI legacy support capability */
+
 #define XHCI_EXT_CAP_ID_LEGACY 1u
 #define XHCI_USBLEGSUP_BIOS_OWNED (1u << 16)
 #define XHCI_USBLEGSUP_OS_OWNED   (1u << 24)
 
-/* TRB types / completion */
+
 #define XHCI_TRB_SETUP_STAGE   2u
 #define XHCI_TRB_DATA_STAGE    3u
 #define XHCI_TRB_STATUS_STAGE  4u
@@ -254,7 +254,7 @@ static void pci_cfg_write32_local(uint8_t bus, uint8_t slot, uint8_t func, uint8
 }
 
 static void xhci_intel_route_ports(const pci_device_t *d) {
-    /* Intel 8-series style USB2/USB3 routing registers. */
+    
     const uint8_t XUSB2PR  = 0xD0;
     const uint8_t XUSB2PRM = 0xD4;
     const uint8_t USB3_PSSEN = 0xD8;
@@ -303,7 +303,7 @@ static void xhci_legacy_handoff(volatile uint8_t *base) {
 
 static int xhci_skip_hard_reset_quirk(const pci_device_t *d) {
     if (!d) return 0;
-    /* Intel 8-series xHCI (8086:8c31) can lose port state with our partial reset path. */
+    
     if (d->vendor_id == 0x8086u && d->device_id == 0x8c31u) return 1;
     return 0;
 }
@@ -335,8 +335,8 @@ static int xhci_speed_is_usb2(uint32_t s) {
 }
 
 static int xhci_usbms_vidpid_fallback(uint16_t vid, uint16_t pid) {
-    if (vid == 0x46f4u && pid == 0x0001u) return 1; /* qemu usb-storage */
-    if (vid == 0x24a9u && pid == 0x205au) return 1; /* ASolid USB_0114 */
+    if (vid == 0x46f4u && pid == 0x0001u) return 1; 
+    if (vid == 0x24a9u && pid == 0x205au) return 1; 
     return 0;
 }
 
@@ -500,7 +500,7 @@ static int xhci_cmd_submit_ex(
     if (hc_index >= XHCI_MAX_CONTROLLERS) return -1;
     rt = &g_xhci_rt[hc_index];
     if (!rt->ready) return -1;
-    /* Keep the last TRB free and wrap producer manually. */
+    
     if (rt->cmd_idx >= XHCI_CMD_TRBS - 1) {
         rt->cmd_idx = 0;
         rt->cmd_cycle ^= 1u;
@@ -845,14 +845,14 @@ int xhci_configure_bulk_endpoints(
     ep_in_ctx = xhci_ctx_ptr(in_ctx, dci_in);
     if (!ep_out_ctx || !ep_in_ctx) return -1;
 
-    /* Bulk OUT endpoint context. */
-    ep_out_ctx[0] = (3u << 1); /* CErr */
+    
+    ep_out_ctx[0] = (3u << 1); 
     ep_out_ctx[1] = ((uint32_t)bulk_mps << 16) | (2u << 3);
     ep_out_ctx[2] = ((uint32_t)(uintptr_t)out_ep->ring & ~0xFu) | 1u;
     ep_out_ctx[4] = 512u;
 
-    /* Bulk IN endpoint context. */
-    ep_in_ctx[0] = (3u << 1); /* CErr */
+    
+    ep_in_ctx[0] = (3u << 1); 
     ep_in_ctx[1] = ((uint32_t)bulk_mps << 16) | (6u << 3);
     ep_in_ctx[2] = ((uint32_t)(uintptr_t)in_ep->ring & ~0xFu) | 1u;
     ep_in_ctx[4] = 512u;
@@ -1087,7 +1087,7 @@ static void xhci_rescan_hc(xhci_hc_ctx_t *hc_ctx, int reset_ports) {
                     st->dev_class = dd.dev_class;
                     st->dev_subclass = dd.dev_subclass;
                     st->dev_proto = dd.dev_proto;
-                    /* Re-arm EP0 dequeue before next control transfer on the same slot. */
+                    
                     (void)xhci_address_device(hc_ctx->index, p, st->speed, slot, &addr_sync);
                     memset(&g_xhci_iface_info[hc_ctx->index][p - 1], 0, sizeof(xhci_iface_info_t));
                     if (xhci_get_interface_info(hc_ctx->index, p, slot, &g_xhci_iface_info[hc_ctx->index][p - 1]) == 0) {
@@ -1098,7 +1098,7 @@ static void xhci_rescan_hc(xhci_hc_ctx_t *hc_ctx, int reset_ports) {
                         st->bulk_out_ep = g_xhci_iface_info[hc_ctx->index][p - 1].bulk_out_ep;
                         st->bulk_mps = g_xhci_iface_info[hc_ctx->index][p - 1].bulk_mps;
                     } else if (xhci_usbms_vidpid_fallback(st->vendor_id, st->product_id)) {
-                        /* Known USBMS fallback while generic interface parsing is incomplete. */
+                        
                         st->dev_class = 0x08u;
                         st->dev_subclass = 0x06u;
                         st->dev_proto = 0x50u;
@@ -1169,7 +1169,7 @@ static int xhci_hc_ioctl(void *ctx, uint32_t request, void *arg) {
         dev_usb_hc_info_t *out = (dev_usb_hc_info_t*)arg;
         memset(out, 0, sizeof(*out));
         out->index = hc_ctx->index;
-        out->type = 1; /* xHCI */
+        out->type = 1; 
         out->mmio_base = hc->mmio_base;
         out->hci_version = hc->hci_version;
         out->ports = hc->max_ports;

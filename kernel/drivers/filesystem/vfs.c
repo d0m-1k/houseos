@@ -170,7 +170,7 @@ int vfs_mount(vfs_t *vfs, const char *mount_path, const char *fs_name, void *fs_
         if (strcmp(vfs->mounts[i].mount_path, norm) == 0) return -1;
     }
 
-    /* mountpoint must already exist and be a directory */
+    
     if (vfs_resolve(vfs, norm, &r) != 0 || !r.ops || !r.ops->get_info) return -1;
     if (r.ops->get_info(r.fs_ctx, r.local_path, &info) != 0) return -1;
     if (info.type != VFS_NODE_DIR) return -1;

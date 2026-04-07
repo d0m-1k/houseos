@@ -297,25 +297,63 @@ static int current_tty_path(char *out, uint32_t cap) {
     return 0;
 }
 
+static const char *path_basename(const char *path) {
+    const char *last = path;
+    if (!path || !path[0]) return "";
+    while (*path) {
+        if (*path == '/') last = path + 1;
+        path++;
+    }
+    return (*last) ? last : "";
+}
+
+static int is_cmd_applet_name(const char *name) {
+    static const char *const applets[] = {
+        "cmd", "echo", "printf", "hexdump", "pwd", "ls", "cat", "grep", "less",
+        "mkdir", "mkfifo", "mksock", "touch", "rm", "rmdir", "cp", "mv", "ln",
+        "tee", "chvt", "ttyinfo", "kbdinfo", "mouseinfo", "reboot", "poweroff",
+        "mount", "umount", "lsblk", "udp", "bootloader", "vesa", "vga"
+    };
+    if (!name || !name[0]) return 0;
+    for (uint32_t i = 0; i < (uint32_t)(sizeof(applets) / sizeof(applets[0])); i++) {
+        if (strcmp(name, applets[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+static int build_cmd_wrapper_cmdline(const char *orig_cmdline, char *out, uint32_t cap) {
+    uint32_t len = 0;
+    if (!out || cap < 2) return -1;
+    out[0] = '\0';
+    if (append_text(out, cap, &len, "--pwd ") != 0) return -1;
+    if (append_quoted_arg(out, cap, &len, g_pwd) != 0) return -1;
+    if (orig_cmdline && orig_cmdline[0]) {
+        if (append_char(out, cap, &len, ' ') != 0) return -1;
+        if (append_text(out, cap, &len, orig_cmdline) != 0) return -1;
+    }
+    return 0;
+}
+
 static int spawn_and_wait(const char *path, const char *cmdline) {
-    char tty_path[64];
+    char tty[64];
+    const char *tty_path = "/dev/tty/1";
     int32_t pid;
-    int32_t status = 0;
-    int tty_fd;
-    if (current_tty_path(tty_path, sizeof(tty_path)) != 0) return -1;
-    pid = spawnv(path, tty_path, cmdline);
+    int tty_fd = -1;
+    int32_t st;
+
+    if (!path || path[0] != '/') return -1;
+    if (current_tty_path(tty, sizeof(tty)) == 0) tty_path = tty;
+
+    pid = spawnv(path, tty_path, cmdline ? cmdline : "");
     if (pid < 0) return -1;
     tty_fd = open(tty_path, 0);
     if (tty_fd >= 0) {
         (void)ioctl(tty_fd, DEV_IOCTL_TTY_SET_FG_PID, &pid);
     }
-    if (waitpid(pid, &status, 0) < 0) {
-        if (tty_fd >= 0) {
-            int32_t none = -1;
-            (void)ioctl(tty_fd, DEV_IOCTL_TTY_SET_FG_PID, &none);
-            close(tty_fd);
-        }
-        return -1;
+    for (;;) {
+        st = task_state(pid);
+        if (st < 0 || st == 3) break;
+        yield();
     }
     if (tty_fd >= 0) {
         int32_t none = -1;
@@ -339,11 +377,25 @@ static int is_elf_file(const char *path) {
 static int try_exec_from_path(const char *name, const char *cmdline) {
     char full[192];
     char abs_name[160];
+    char wrapped[768];
+    const char *base;
 
     if (strchr(name, '/')) {
         if (normalize_path(name, abs_name, sizeof(abs_name)) != 0) return -1;
+        base = path_basename(abs_name);
+        if (strcmp(abs_name, "/bin/cmd") != 0 && is_cmd_applet_name(base)) {
+            if (!is_elf_file("/bin/cmd")) return -1;
+            if (build_cmd_wrapper_cmdline(cmdline, wrapped, sizeof(wrapped)) != 0) return -1;
+            return spawn_and_wait("/bin/cmd", wrapped);
+        }
         if (!is_elf_file(abs_name)) return -1;
         return spawn_and_wait(abs_name, cmdline);
+    }
+
+    if (is_cmd_applet_name(name)) {
+        if (!is_elf_file("/bin/cmd")) return -1;
+        if (build_cmd_wrapper_cmdline(cmdline, wrapped, sizeof(wrapped)) != 0) return -1;
+        return spawn_and_wait("/bin/cmd", wrapped);
     }
 
     {
@@ -478,11 +530,9 @@ static int parse_argv(const char *cmd, char argv[MAX_ARGS][MAX_TOKEN], int *argc
 static int exec_single(const char *cmd) {
     char argv[MAX_ARGS][MAX_TOKEN];
     int argc = 0;
-    char cmdline[512];
-    char dispatch[700];
-    uint32_t dlen = 0;
     char abs[160];
     char buf[512];
+    char cmdline[512];
 
     if (parse_argv(cmd, argv, &argc) != 0) {
         fprintf(stderr, "parse error\n");
@@ -579,38 +629,12 @@ static int exec_single(const char *cmd) {
         return 0;
     }
 
-    if (build_cmdline_from_argv(argv, argc, cmdline, sizeof(cmdline)) != 0) {
-        fprintf(stderr, "parse error\n");
-        return -1;
+    if (build_cmdline_from_argv(argv, argc, cmdline, sizeof(cmdline)) == 0) {
+        if (try_exec_from_path(argv[0], cmdline) == 0) return 0;
     }
 
-    {
-        int exec_rc = try_exec_from_path(argv[0], cmdline);
-        if (exec_rc == 0) return 0;
-        if (strchr(argv[0], '/')) {
-            char exec_path[160];
-            if (normalize_path(argv[0], exec_path, sizeof(exec_path)) == 0 && is_elf_file(exec_path)) {
-                fprintf(stderr, "exec failed\n");
-                return -1;
-            }
-        }
-    }
-
-    if (!is_elf_file("/bin/cmd")) {
-        fprintf(stderr, "command backend missing: /bin/cmd\n");
-        return -1;
-    }
-
-    dispatch[0] = '\0';
-    if (append_text(dispatch, sizeof(dispatch), &dlen, "--pwd ") != 0) return -1;
-    if (append_quoted_arg(dispatch, sizeof(dispatch), &dlen, g_pwd) != 0) return -1;
-    if (append_char(dispatch, sizeof(dispatch), &dlen, ' ') != 0) return -1;
-    if (append_text(dispatch, sizeof(dispatch), &dlen, cmdline) != 0) return -1;
-    if (spawn_and_wait("/bin/cmd", dispatch) != 0) {
-        fprintf(stderr, "command backend failed: /bin/cmd\n");
-        return -1;
-    }
-    return 0;
+    fprintf(stderr, "command not found: %s\n", argv[0]);
+    return -1;
 }
 
 static int split_outside_quotes(const char *s, char delim, uint32_t *pos_out) {

@@ -21,7 +21,7 @@ void power_reboot(void) {
 void power_poweroff(void) {
     cli();
 
-    /* Common ACPI/QEMU power-off ports. */
+    
     outw(0x604, 0x2000);
     outw(0xB004, 0x2000);
     outw(0x4004, 0x3400);

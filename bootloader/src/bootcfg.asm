@@ -1,7 +1,7 @@
 bits 16
 
 %ifndef CFG_MAGIC
-%define CFG_MAGIC 0x47464348 ; "HCFG"
+%define CFG_MAGIC 0x47464348
 %endif
 %ifndef CFG_VERSION
 %define CFG_VERSION 1

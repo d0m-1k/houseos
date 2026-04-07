@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-#define STACK_SIZE 4096
+#define STACK_SIZE 16384
 #define MAX_TASKS 16
 
 typedef enum {

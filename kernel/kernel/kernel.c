@@ -47,7 +47,7 @@ typedef struct {
 
 static fb_ctx_t g_fb_ctx;
 static fb_ctx_t g_vga_ctx;
-static user_boot_task_t g_init_boot = { "/dev/tty/1", "/bin/init" };
+static user_boot_task_t g_init_boot = { "/dev/tty/S0", "/bin/init" };
 
 static int prepare_empty_user_stack(uint32_t *user_esp_out) {
     uint32_t sp;
@@ -128,7 +128,6 @@ static void user_boot_task(void *arg) {
     uint32_t user_cr3 = 0;
     uint32_t user_esp = USER_STACK_TOP;
 
-    cli();
     if (!cfg || !cfg->tty_path || !cfg->prog_path) task_exit();
     tty_path = cfg->tty_path;
     prog_path = cfg->prog_path;
@@ -182,7 +181,8 @@ static void user_boot_task(void *arg) {
         tty_klog("boot_task: bad user stack\n");
         task_exit();
     }
-    jump_to_ring3(entry, user_esp, 0x202);
+    sti();
+    jump_to_user_image_compat(entry, user_esp);
     task_exit();
 }
 
@@ -337,6 +337,12 @@ void kmain(void) {
     } else {
         (void)vfs_set_mount_source(&g_vfs, "/proc", "procfs");
     }
+    if (vfs_mkdir(&g_vfs, "/dev") != 0) {
+        vfs_info_t dev_info;
+        if (vfs_get_info(&g_vfs, "/dev", &dev_info) != 0 || dev_info.type != VFS_NODE_DIR) {
+            tty_klog("kmain: ensure /dev failed\n");
+        }
+    }
 
     if (use_fat_root) {
         const char *data_disk = root_disk ? root_disk : "disk0";
@@ -362,6 +368,5 @@ void kmain(void) {
         int pid = task_create(user_boot_task, &g_init_boot);
         if (pid < 0) tty_klog("kmain: task_create init failed\n");
     }
-    sti();
     task_exit();
 }

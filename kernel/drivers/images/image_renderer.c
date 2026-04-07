@@ -1,4 +1,4 @@
-// image_renderer.c - полностью без плавающей точки
+
 #include <drivers/images/image.h>
 #include <string.h>
 
@@ -113,7 +113,7 @@ void image_draw_alpha(image_t* img, uint32_t x, uint32_t y) {
                 uint8_t bg_r, bg_g, bg_b, bg_a;
                 vesa_extract_color(bg_color, &bg_r, &bg_g, &bg_b, &bg_a);
                 
-                // ТОЛЬКО ЦЕЛОЧИСЛЕННОЕ ВЫЧИСЛЕНИЕ - УБРАН float!
+                
                 uint8_t r = alpha_blend(src_pixel[0], bg_r, alpha);
                 uint8_t g = alpha_blend(src_pixel[1], bg_g, alpha);
                 uint8_t b = alpha_blend(src_pixel[2], bg_b, alpha);

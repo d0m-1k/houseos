@@ -124,32 +124,32 @@ static void usbkbd_emit_event(uint8_t scancode, uint8_t pressed, uint8_t shift, 
 static uint8_t hid_to_set1(uint8_t hid, uint8_t *extended) {
     *extended = 0;
     switch (hid) {
-        case 0x04: return 0x1E; /* a */
-        case 0x05: return 0x30; /* b */
-        case 0x06: return 0x2E; /* c */
-        case 0x07: return 0x20; /* d */
-        case 0x08: return 0x12; /* e */
-        case 0x09: return 0x21; /* f */
-        case 0x0A: return 0x22; /* g */
-        case 0x0B: return 0x23; /* h */
-        case 0x0C: return 0x17; /* i */
-        case 0x0D: return 0x24; /* j */
-        case 0x0E: return 0x25; /* k */
-        case 0x0F: return 0x26; /* l */
-        case 0x10: return 0x32; /* m */
-        case 0x11: return 0x31; /* n */
-        case 0x12: return 0x18; /* o */
-        case 0x13: return 0x19; /* p */
-        case 0x14: return 0x10; /* q */
-        case 0x15: return 0x13; /* r */
-        case 0x16: return 0x1F; /* s */
-        case 0x17: return 0x14; /* t */
-        case 0x18: return 0x16; /* u */
-        case 0x19: return 0x2F; /* v */
-        case 0x1A: return 0x11; /* w */
-        case 0x1B: return 0x2D; /* x */
-        case 0x1C: return 0x15; /* y */
-        case 0x1D: return 0x2C; /* z */
+        case 0x04: return 0x1E; 
+        case 0x05: return 0x30; 
+        case 0x06: return 0x2E; 
+        case 0x07: return 0x20; 
+        case 0x08: return 0x12; 
+        case 0x09: return 0x21; 
+        case 0x0A: return 0x22; 
+        case 0x0B: return 0x23; 
+        case 0x0C: return 0x17; 
+        case 0x0D: return 0x24; 
+        case 0x0E: return 0x25; 
+        case 0x0F: return 0x26; 
+        case 0x10: return 0x32; 
+        case 0x11: return 0x31; 
+        case 0x12: return 0x18; 
+        case 0x13: return 0x19; 
+        case 0x14: return 0x10; 
+        case 0x15: return 0x13; 
+        case 0x16: return 0x1F; 
+        case 0x17: return 0x14; 
+        case 0x18: return 0x16; 
+        case 0x19: return 0x2F; 
+        case 0x1A: return 0x11; 
+        case 0x1B: return 0x2D; 
+        case 0x1C: return 0x15; 
+        case 0x1D: return 0x2C; 
         case 0x1E: return KEY_1;
         case 0x1F: return KEY_2;
         case 0x20: return KEY_3;
@@ -158,24 +158,24 @@ static uint8_t hid_to_set1(uint8_t hid, uint8_t *extended) {
         case 0x23: return KEY_6;
         case 0x24: return KEY_7;
         case 0x25: return KEY_8;
-        case 0x26: return 0x0A; /* 9 */
-        case 0x27: return 0x0B; /* 0 */
+        case 0x26: return 0x0A; 
+        case 0x27: return 0x0B; 
         case 0x28: return KEY_ENTER;
         case 0x29: return KEY_ESC;
         case 0x2A: return KEY_BACKSPACE;
         case 0x2B: return KEY_TAB;
-        case 0x2C: return 0x39; /* space */
-        case 0x2D: return 0x0C; /* - */
-        case 0x2E: return 0x0D; /* = */
-        case 0x2F: return 0x1A; /* [ */
-        case 0x30: return 0x1B; /* ] */
-        case 0x31: return 0x2B; /* \ */
-        case 0x33: return 0x27; /* ; */
-        case 0x34: return 0x28; /* ' */
-        case 0x35: return 0x29; /* ` */
-        case 0x36: return 0x33; /* , */
-        case 0x37: return 0x34; /* . */
-        case 0x38: return 0x35; /* / */
+        case 0x2C: return 0x39; 
+        case 0x2D: return 0x0C; 
+        case 0x2E: return 0x0D; 
+        case 0x2F: return 0x1A; 
+        case 0x30: return 0x1B; 
+        case 0x31: return 0x2B; 
+        case 0x33: return 0x27; 
+        case 0x34: return 0x28; 
+        case 0x35: return 0x29; 
+        case 0x36: return 0x33; 
+        case 0x37: return 0x34; 
+        case 0x38: return 0x35; 
         case 0x39: return KEY_CAPS;
         case 0x3A: return KEY_F1;
         case 0x3B: return KEY_F2;
@@ -313,13 +313,13 @@ static void usbkbd_probe(int log_result) {
                 iface.intr_interval = iface.intr_interval ? iface.intr_interval : 10u;
             }
 
-            (void)xhci_control_out0(hc, p, 0x00u, 0x09u, 1u, 0u); /* SET_CONFIGURATION(1) */
+            (void)xhci_control_out0(hc, p, 0x00u, 0x09u, 1u, 0u); 
             if (xhci_configure_interrupt_in_endpoint(hc, p, iface.intr_in_ep, iface.intr_mps, iface.intr_interval) != 0) {
                 if (log_result) tty_klog("usbkbd: cfg ep failed\n");
                 continue;
             }
-            (void)xhci_control_out0(hc, p, 0x21u, 0x0Bu, 0u, iface.iface_num); /* SET_PROTOCOL boot */
-            (void)xhci_control_out0(hc, p, 0x21u, 0x0Au, 0u, iface.iface_num); /* SET_IDLE */
+            (void)xhci_control_out0(hc, p, 0x21u, 0x0Bu, 0u, iface.iface_num); 
+            (void)xhci_control_out0(hc, p, 0x21u, 0x0Au, 0u, iface.iface_num); 
             d = &g_kbd[g_kbd_count++];
             d->present = 1;
             d->hc = (uint8_t)hc;

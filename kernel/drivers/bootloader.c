@@ -4,7 +4,7 @@
 #include <string.h>
 
 #define BOOTCFG_ADDR 0x00000600u
-#define CFG_MAGIC    0x47464348u /* "HCFG" */
+#define CFG_MAGIC    0x47464348u 
 
 typedef struct {
     uint32_t magic;

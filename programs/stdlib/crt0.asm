@@ -4,13 +4,10 @@ extern main
 extern exit
 
 _start:
-    ; Initial user stack layout provided by kernel:
-    ;   [esp + 0]  = argc
-    ;   [esp + 4]  = argv[0]
-    ;   ...
-    ;   [esp + 4 + 4*argc] = NULL
-    mov eax, [esp]       ; argc
-    lea ebx, [esp + 4]   ; argv
+
+
+    mov eax, [esp]
+    lea ebx, [esp + 4]
     push ebx
     push eax
     call main

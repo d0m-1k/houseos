@@ -24,7 +24,7 @@ init_pm:
     mov ebp, 0x70000
     mov esp, ebp
 
-    ; Temporary protected-mode IDT for early faults (vectors 0..13).
+
     lea edi, [pm_idt]
     mov ecx, 14
     mov eax, pm_fault_halt

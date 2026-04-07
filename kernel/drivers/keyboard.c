@@ -357,7 +357,8 @@ static void keyboard_process_scancode(uint8_t scancode) {
         hotkey_latched_scancode = -1;
     }
 
-    if (pressed && (keycode >= KEY_F1 && keycode <= KEY_F8) && ctrl_pressed && (shift_pressed || alt_pressed)) {
+    if (pressed && (keycode >= KEY_F1 && keycode <= KEY_F8) &&
+        (alt_pressed || (ctrl_pressed && shift_pressed))) {
         if (hotkey_latched_scancode != (int)keycode) {
             if (hotkey_handler) hotkey_handler(keycode, true, shift_pressed, ctrl_pressed, alt_pressed);
             hotkey_latched_scancode = (int)keycode;
@@ -447,16 +448,19 @@ void keyboard_handler(void) {
     uint8_t status = inb(0x64);
     uint8_t scancode;
     if ((status & 0x01u) == 0u) return;
-    if (status & 0x20u) {
-        (void)inb(0x60);
-        return;
-    }
+    if (status & 0x20u) return;
     scancode = inb(0x60);
     keyboard_process_scancode(scancode);
 }
 
 char keyboard_getchar(void) {
-    while (buffer_count == 0) hlt();
+    uint32_t flags;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(flags) :: "memory");
+    while (buffer_count == 0) {
+        sti();
+        hlt();
+    }
+    if ((flags & (1u << 9)) == 0u) cli();
     return buffer_get();
 }
 
@@ -465,7 +469,13 @@ bool keyboard_available(void) {
 }
 
 struct key_event keyboard_get_event(void) {
-    while (event_count == 0) hlt();
+    uint32_t flags;
+    __asm__ __volatile__("pushf; pop %0" : "=r"(flags) :: "memory");
+    while (event_count == 0) {
+        sti();
+        hlt();
+    }
+    if ((flags & (1u << 9)) == 0u) cli();
     return event_buffer_get();
 }
 
@@ -525,7 +535,7 @@ void keyboard_clear_buffers(void) {
     buffer_head = buffer_tail = buffer_count = 0;
     event_head = event_tail = event_count = 0;
     scancode_head = scancode_tail = scancode_count = 0;
-    /* Drop transient modifier/chord state so tty switch cannot leave keys "stuck". */
+    
     shift_pressed = false;
     ctrl_pressed = false;
     alt_pressed = false;
@@ -577,7 +587,8 @@ void keyboard_inject_event(uint8_t scancode, char ascii, bool pressed, bool shif
     if (!pressed && hotkey_latched_scancode == (int)scancode) {
         hotkey_latched_scancode = -1;
     }
-    if (pressed && (scancode >= KEY_F1 && scancode <= KEY_F8) && ctrl_pressed && (shift_pressed || alt_pressed)) {
+    if (pressed && (scancode >= KEY_F1 && scancode <= KEY_F8) &&
+        (alt_pressed || (ctrl_pressed && shift_pressed))) {
         if (hotkey_latched_scancode != (int)scancode) {
             if (hotkey_handler) hotkey_handler(scancode, true, shift_pressed, ctrl_pressed, alt_pressed);
             hotkey_latched_scancode = (int)scancode;

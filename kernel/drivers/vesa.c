@@ -17,9 +17,9 @@ static uint32_t bytes_per_pixel = 0;
 bool vesa_init(void) {
     uint32_t min_pitch;
     if (strncmp(vesa_info->signature, "VESA", 4) != 0) return false;
-    if ((mode_info->attributes & 0x0001u) == 0u) return false; /* supported */
-    if ((mode_info->attributes & 0x0010u) == 0u) return false; /* graphics mode */
-    if ((mode_info->attributes & 0x0080u) == 0u) return false; /* linear framebuffer */
+    if ((mode_info->attributes & 0x0001u) == 0u) return false; 
+    if ((mode_info->attributes & 0x0010u) == 0u) return false; 
+    if ((mode_info->attributes & 0x0080u) == 0u) return false; 
     if (mode_info->width == 0 || mode_info->height == 0) return false;
     if (mode_info->bpp < 8 || mode_info->bpp > 32) return false;
     if (mode_info->framebuffer < 0x00100000u) return false;

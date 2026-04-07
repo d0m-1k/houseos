@@ -23,3 +23,15 @@ void jump_to_ring3(uint32_t user_eip, uint32_t user_esp, uint32_t user_eflags) {
         : "ax", "memory"
     );
 }
+
+void jump_to_user_image_compat(uint32_t user_eip, uint32_t user_esp) {
+    __asm__ __volatile__(
+        "movl %0, %%esp\n"
+        "xorl %%ebp, %%ebp\n"
+        "jmp *%1\n"
+        :
+        : "r"(user_esp), "r"(user_eip)
+        : "memory"
+    );
+    __builtin_unreachable();
+}

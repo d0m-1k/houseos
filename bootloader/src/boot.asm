@@ -1,7 +1,7 @@
 org 0x7E00
 bits 16
 
-CFG_MAGIC               equ 0x47464348 ; "HCFG"
+CFG_MAGIC               equ 0x47464348
 CFG_KERNEL_SIZE         equ 8
 CFG_KERNEL_LBA          equ 12
 CFG_KERNEL_ADDR         equ 16
@@ -19,6 +19,7 @@ CFG_ROOTFS_LBA          equ 60
 CFG_ROOTFS_SIZE         equ 64
 
 CFG_FLAG_DEBUG          equ 1
+LOAD_BOUNCE_ADDR        equ 0x3000
 
 _start:
     jmp 0x0000:.cs0
@@ -40,7 +41,7 @@ _start:
     cmp bx, 0xAA55
     jne .lba_error
 
-    ; read boot config sector (LBA 1) to 0000:0600
+
     mov word [dap_sectors], 1
     mov word [dap_offset], 0x0600
     mov word [dap_segment], 0x0000
@@ -143,7 +144,7 @@ _start:
     hlt
     jmp .halt
 
-; in: EAX=lba, EBX=linear addr, ECX=size in bytes
+
 load_blob:
     pushad
     mov [load_lba], eax
@@ -165,10 +166,18 @@ load_blob:
     mov word [dap_sectors], ax
 
     mov eax, [load_addr]
+    cmp eax, 0x00100000
+    jae .bounce_read
     call linear_to_seg_off
     mov [dap_offset], ax
     mov [dap_segment], dx
+    jmp .do_read
 
+.bounce_read:
+    mov word [dap_offset], LOAD_BOUNCE_ADDR
+    mov word [dap_segment], 0x0000
+
+.do_read:
     mov eax, [load_lba]
     mov [dap_start_lba], eax
     mov dword [dap_start_lba+4], 0
@@ -176,6 +185,24 @@ load_blob:
     call read_lba
     jc .error
 
+    mov eax, [load_addr]
+    cmp eax, 0x00100000
+    jb .advance
+
+    xor esi, esi
+    mov si, LOAD_BOUNCE_ADDR
+    mov edi, [load_addr]
+    movzx ecx, word [load_chunk]
+    shl ecx, 7
+.copy_dwords:
+    mov eax, [esi]
+    mov [edi], eax
+    add esi, 4
+    add edi, 4
+    dec ecx
+    jnz .copy_dwords
+
+.advance:
     movzx eax, word [load_chunk]
     mov edx, eax
     shl eax, 9
@@ -199,7 +226,7 @@ load_blob:
     stc
     ret
 
-; in EAX linear address (<1MB), out AX=offset, DX=segment
+
 linear_to_seg_off:
     push bx
     mov ebx, eax
@@ -287,7 +314,6 @@ msg_vesa:                  db "ST2: vesa", 0x0D, 0x0A, 0
 msg_a20:                   db "ST2: a20", 0x0D, 0x0A, 0
 msg_pm:                    db "ST2: pm", 0x0D, 0x0A, 0
 
-; Keep VESA temporary buffers at the very end of stage2 data,
-; so they don't land in the middle of executable code.
+
 vesa_info_buffer:          times 512 db 0
 mode_info_buffer:          times 256 db 0

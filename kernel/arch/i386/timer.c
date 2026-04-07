@@ -21,7 +21,7 @@ void timer_handler(void) {
 }
 
 void timer_init(void) {
-    uint32_t divisor = 1193180 / 100; // 100 Гц
+    uint32_t divisor = 1193180 / 100; 
     outb(0x43, 0x36);
     outb(0x40, divisor & 0xFF);
     outb(0x40, (divisor >> 8) & 0xFF);
@@ -38,7 +38,6 @@ void sleep(uint32_t ms) {
     if (ticks_to_wait == 0) ticks_to_wait = 1;
 
     uint32_t deadline = ticks + ticks_to_wait;
-
     cli();
     current_task->state = TASK_BLOCKED;
     current_task->wake_tick = deadline;

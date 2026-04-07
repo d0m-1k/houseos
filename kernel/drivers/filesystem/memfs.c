@@ -445,28 +445,78 @@ memfs_inode* memfs_create_device_ops(
 
 int memfs_delete_file(memfs *fs, const char *path) {
     memfs *owner_fs = fs;
-    memfs_inode *node = lookup_path_ex(fs, path, &owner_fs);
-    if (!node || !is_storage_node(node->type)) return -1;
-    if (node->file.data) {
-        vfree(node->file.data);
-        used_sub(owner_fs, node->file.size);
-        node->file.data = NULL;
-        node->file.size = 0;
+    memfs_inode *parent = NULL;
+    memfs_dentry *d;
+    memfs_dentry *prev = NULL;
+    memfs_inode *node;
+    if (!fs || !path || strcmp(path, "/") == 0) return -1;
+    d = lookup_path_dentry(fs, path, &owner_fs, &parent);
+    if (!d || !parent || !d->inode || d->mounted_fs) return -1;
+    node = d->inode;
+    if (!is_storage_node(node->type)) return -1;
+
+    {
+        memfs_dentry *it = parent->dir.entries;
+        while (it && it != d) {
+            prev = it;
+            it = it->next;
+        }
+        if (it != d) return -1;
     }
-    node->link_count--;
+
+    if (prev) prev->next = d->next;
+    else parent->dir.entries = d->next;
+    if (parent->dir.entry_count > 0) parent->dir.entry_count--;
+    if (node->link_count > 0) node->link_count--;
+    if (d->name) vfree(d->name);
+    vfree(d);
+
+    if (node->link_count == 0) {
+        if (node->file.data) {
+            vfree(node->file.data);
+            used_sub(owner_fs, node->file.size);
+            node->file.data = NULL;
+            node->file.size = 0;
+        }
+        if (node->name) vfree(node->name);
+        if (owner_fs->inode_count > 0) owner_fs->inode_count--;
+        vfree(node);
+    }
     return 0;
 }
 
 int memfs_delete_dir(memfs *fs, const char *path) {
     memfs *owner_fs = fs;
-    memfs_dentry *d = lookup_path_dentry(fs, path, &owner_fs, NULL);
+    memfs_inode *parent = NULL;
+    memfs_dentry *d;
+    memfs_dentry *prev = NULL;
     memfs_inode *node;
-    if (!d || !d->inode || d->inode->type != MEMFS_TYPE_DIR) return -1;
+    if (!fs || !path || strcmp(path, "/") == 0) return -1;
+    d = lookup_path_dentry(fs, path, &owner_fs, &parent);
+    if (!d || !parent || !d->inode || d->inode->type != MEMFS_TYPE_DIR) return -1;
     if (d->mounted_fs) return -1;
     node = d->inode;
     if (node == owner_fs->root) return -1;
     if (node->dir.entry_count > 0) return -1;
-    node->link_count--;
+    {
+        memfs_dentry *it = parent->dir.entries;
+        while (it && it != d) {
+            prev = it;
+            it = it->next;
+        }
+        if (it != d) return -1;
+    }
+    if (prev) prev->next = d->next;
+    else parent->dir.entries = d->next;
+    if (parent->dir.entry_count > 0) parent->dir.entry_count--;
+    if (node->link_count > 0) node->link_count--;
+    if (d->name) vfree(d->name);
+    vfree(d);
+    if (node->link_count == 0) {
+        if (node->name) vfree(node->name);
+        if (owner_fs->inode_count > 0) owner_fs->inode_count--;
+        vfree(node);
+    }
     return 0;
 }
 

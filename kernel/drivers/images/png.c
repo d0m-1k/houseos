@@ -1,4 +1,4 @@
-// images/png.c
+
 #include <drivers/images/png.h>
 #include <string.h>
 
@@ -10,6 +10,6 @@ bool png_verify(const uint8_t* data, size_t size) {
 }
 
 image_t* png_load(const uint8_t* data, size_t size) {
-    // TODO: Реализовать PNG парсер
+    
     return NULL;
 }
