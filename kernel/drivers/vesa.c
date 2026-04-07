@@ -7,10 +7,10 @@ static vesa_mode_info_t* mode_info = (vesa_mode_info_t*)MODE_INFO_ADDR;
 static uint8_t* framebuffer = NULL;
 static bool initialized = false;
 static uint32_t bytes_per_pixel = 0;
-#ifndef CONFIG_VESA_ROTATION_DEG
-#define CONFIG_VESA_ROTATION_DEG 0
+#ifndef CONFIG_VESA_ROTATION
+#define CONFIG_VESA_ROTATION 0
 #endif
-static uint32_t rotation_deg = (uint32_t)CONFIG_VESA_ROTATION_DEG;
+static uint32_t rotation_deg = 0;
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -83,6 +83,23 @@ static void vesa_map_xy(uint32_t x, uint32_t y, uint32_t *px, uint32_t *py) {
             *py = y;
             break;
     }
+}
+
+bool vesa_set_rotation(uint32_t degrees) {
+#if CONFIG_VESA_ROTATION
+    if (degrees == 0u || degrees == 90u || degrees == 180u || degrees == 270u) {
+        rotation_deg = degrees;
+        return true;
+    }
+    return false;
+#else
+    if (degrees == 0u) return true;
+    return false;
+#endif
+}
+
+uint32_t vesa_get_rotation(void) {
+    return rotation_deg;
 }
 
 uint32_t vesa_calculate_pixel_offset(uint32_t x, uint32_t y) {

@@ -127,6 +127,17 @@ static int fb_ioctl(void *ctx, uint32_t request, void *arg) {
         out->size = fb->size;
         return 0;
     }
+    if (request == DEV_IOCTL_VESA_GET_ROTATION) {
+        uint32_t *out = (uint32_t*)arg;
+        if (!out) return -1;
+        *out = vesa_get_rotation();
+        return 0;
+    }
+    if (request == DEV_IOCTL_VESA_SET_ROTATION) {
+        uint32_t *in = (uint32_t*)arg;
+        if (!in) return -1;
+        return vesa_set_rotation(*in) ? 0 : -1;
+    }
     return -1;
 }
 

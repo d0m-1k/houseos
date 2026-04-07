@@ -13,9 +13,36 @@ int cmd_vesa(int argc, char **argv, int arg0, const char *cwd) {
     (void)cwd;
 
     if (arg0 + 1 >= argc) {
-        fprintf(stderr, "usage: vesa modes [w=] [h=] [b=] [r=] | vesa info | vesa get | vesa set <mode>\n");
+        fprintf(stderr, "usage: vesa modes [w=] [h=] [b=] [r=] | vesa info | vesa get | vesa set <mode> | vesa rotation [get|set <0|90|180|270>]\n");
         return 1;
     }
+
+    if (strcmp(argv[arg0 + 1], "rotation") == 0) {
+        int fdev = open("/dev/vesa", 0);
+        uint32_t rot = 0;
+        if (fdev < 0) return 1;
+        if (arg0 + 2 >= argc || strcmp(argv[arg0 + 2], "get") == 0) {
+            if (ioctl(fdev, DEV_IOCTL_VESA_GET_ROTATION, &rot) != 0) {
+                close(fdev);
+                return 1;
+            }
+            fprintf(stdout, "%u\n", rot);
+            close(fdev);
+            return 0;
+        }
+        if (strcmp(argv[arg0 + 2], "set") == 0 && arg0 + 3 < argc && parse_u32(argv[arg0 + 3], &rot) == 0) {
+            if (ioctl(fdev, DEV_IOCTL_VESA_SET_ROTATION, &rot) != 0) {
+                close(fdev);
+                return 1;
+            }
+            close(fdev);
+            return 0;
+        }
+        close(fdev);
+        fprintf(stderr, "usage: vesa rotation [get|set <0|90|180|270>]\n");
+        return 1;
+    }
+
     fd = open("/dev/bootloader", 0);
     if (fd < 0) return 1;
 
@@ -94,6 +121,6 @@ int cmd_vesa(int argc, char **argv, int arg0, const char *cwd) {
     }
 
     close(fd);
-    fprintf(stderr, "usage: vesa modes [w=] [h=] [b=] [r=] | vesa info | vesa get | vesa set <mode>\n");
+    fprintf(stderr, "usage: vesa modes [w=] [h=] [b=] [r=] | vesa info | vesa get | vesa set <mode> | vesa rotation [get|set <0|90|180|270>]\n");
     return 1;
 }

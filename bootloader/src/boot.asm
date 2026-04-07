@@ -63,6 +63,7 @@ _start:
     test dword [boot_flags], CFG_FLAG_DEBUG
     jz .no_dbg
     mov byte [debug_enabled], 1
+    call serial_init
 .no_dbg:
 
     mov eax, [cfg_base + CFG_MEMMAP_ADDR]
@@ -274,7 +275,68 @@ dbg_print:
     cmp byte [debug_enabled], 0
     je .done
     call print
+    call serial_print
 .done:
+    ret
+
+serial_init:
+    push dx
+    mov dx, 0x3F9
+    mov al, 0x00
+    out dx, al
+
+    mov dx, 0x3FB
+    mov al, 0x80
+    out dx, al
+
+    mov dx, 0x3F8
+    mov al, 0x03
+    out dx, al
+
+    mov dx, 0x3F9
+    mov al, 0x00
+    out dx, al
+
+    mov dx, 0x3FB
+    mov al, 0x03
+    out dx, al
+
+    mov dx, 0x3FA
+    mov al, 0xC7
+    out dx, al
+
+    mov dx, 0x3FC
+    mov al, 0x0B
+    out dx, al
+    pop dx
+    ret
+
+serial_putc:
+    push ax
+    push dx
+    mov ah, al
+.wait:
+    mov dx, 0x3FD
+    in al, dx
+    test al, 0x20
+    jz .wait
+    mov dx, 0x3F8
+    mov al, ah
+    out dx, al
+    pop dx
+    pop ax
+    ret
+
+serial_print:
+    pusha
+.loop:
+    lodsb
+    cmp al, 0
+    je .done
+    call serial_putc
+    jmp .loop
+.done:
+    popa
     ret
 
 %include "print.asm"

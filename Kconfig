@@ -12,10 +12,6 @@ config BOOT_DYNAMIC_PARAMS
     bool "Enable dynamic boot parameters from /dev/bootloader"
     default y
 
-config BOOT_DEBUG
-    bool "Enable stage2 debug messages"
-    default n
-
 config BOOT_FLAGS_EXTRA
     hex "Extra boot flags bitmask"
     default 0x0
@@ -86,24 +82,10 @@ config GRAPHICS_VESA_MODE
     depends on GRAPHICS_BACKEND_VESA
     default 0x0118
 
-choice
-    prompt "VESA rotation"
+config VESA_ROTATION
+    bool "Enable runtime VESA rotation"
     depends on GRAPHICS_BACKEND_VESA
-    default VESA_ROTATION_0
-
-config VESA_ROTATION_0
-    bool "0 degrees"
-
-config VESA_ROTATION_90
-    bool "90 degrees"
-
-config VESA_ROTATION_180
-    bool "180 degrees"
-
-config VESA_ROTATION_270
-    bool "270 degrees"
-
-endchoice
+    default y
 
 config GSHELL
     bool "Graphical shell"
@@ -114,6 +96,10 @@ endmenu
 endmenu
 
 menu "Debug"
+
+config BOOT_DEBUG
+    bool "Bootloader (stage2) debug messages"
+    default n
 
 config DEBUG_KERNEL_SERIAL_LOG
     bool "Verbose kernel serial logs"
@@ -195,6 +181,7 @@ config APPLET_UMOUNT
 
 config APPLET_LSBLK
     bool "lsblk"
+    depends on KERNEL_FS_DEVFS
     default n
 
 endmenu
@@ -215,14 +202,17 @@ config APPLET_HEXDUMP
 
 config APPLET_REBOOT
     bool "reboot"
+    depends on KERNEL_FS_DEVFS
     default y
 
 config APPLET_POWEROFF
     bool "poweroff"
+    depends on KERNEL_FS_DEVFS
     default y
 
 config APPLET_BOOTLOADER
     bool "bootloader"
+    depends on BOOT_DYNAMIC_PARAMS && KERNEL_FS_DEVFS
     default n
 
 endmenu
@@ -239,6 +229,7 @@ menu "Display and input"
 
 config APPLET_CHVT
     bool "chvt"
+    depends on KERNEL_FS_DEVFS
     default n
 
 config APPLET_TTYINFO
@@ -247,18 +238,22 @@ config APPLET_TTYINFO
 
 config APPLET_KBDINFO
     bool "kbdinfo"
+    depends on KERNEL_FS_DEVFS && PS2_KEYBOARD
     default n
 
 config APPLET_MOUSEINFO
     bool "mouseinfo"
+    depends on KERNEL_FS_DEVFS && PS2_MOUSE
     default n
 
 config APPLET_VESA
     bool "vesa"
+    depends on KERNEL_FS_DEVFS && GRAPHICS_BACKEND_VESA
     default n
 
 config APPLET_VGA
     bool "vga"
+    depends on KERNEL_FS_DEVFS && GRAPHICS_BACKEND_VGA
     default n
 
 endmenu

@@ -80,6 +80,8 @@ uint32_t vesa_get_pitch(void);
 uint32_t vesa_get_bpp(void);
 uint32_t vesa_get_framebuffer(void);
 uint32_t vesa_calculate_pixel_offset(uint32_t x, uint32_t y);
+bool vesa_set_rotation(uint32_t degrees);
+uint32_t vesa_get_rotation(void);
 
 uint32_t vesa_rgb(uint8_t r, uint8_t g, uint8_t b);
 uint32_t vesa_argb(uint8_t a, uint8_t r, uint8_t g, uint8_t b);
