@@ -9,7 +9,14 @@ int cmd_umount(int argc, char **argv, int arg0, const char *cwd) {
         fprintf(stderr, "usage: umount <mountpoint>\n");
         return 1;
     }
-    if (normalize_path(cwd, argv[arg0 + 1], path, sizeof(path)) != 0) return 1;
+    if (arg0 + 2 < argc) {
+        fprintf(stderr, "usage: umount <mountpoint>\n");
+        return 1;
+    }
+    if (normalize_path(cwd, argv[arg0 + 1], path, sizeof(path)) != 0) {
+        fprintf(stderr, "umount: bad path: %s\n", argv[arg0 + 1]);
+        return 1;
+    }
     if (umount(path) != 0) {
         fprintf(stderr, "umount failed\n");
         return 1;

@@ -17,7 +17,10 @@ int cmd_vga(int argc, char **argv, int arg0, const char *cwd) {
         return 1;
     }
     fd = open("/dev/bootloader", 0);
-    if (fd < 0) return 1;
+    if (fd < 0) {
+        fprintf(stderr, "vga: cannot open /dev/bootloader\n");
+        return 1;
+    }
 
     if (strcmp(argv[arg0 + 1], "modes") == 0) {
         if (parse_modes_filters(argc, argv, arg0 + 2, &mf) != 0) {
@@ -39,11 +42,13 @@ int cmd_vga(int argc, char **argv, int arg0, const char *cwd) {
         int vdev = open("/dev/vga", 0);
         if (vdev < 0) {
             close(fd);
+            fprintf(stderr, "vga: cannot open /dev/vga\n");
             return 1;
         }
         if (ioctl(vdev, DEV_IOCTL_VGA_GET_INFO, &vi) != 0) {
             close(vdev);
             close(fd);
+            fprintf(stderr, "vga: info query failed\n");
             return 1;
         }
         {
@@ -63,6 +68,7 @@ int cmd_vga(int argc, char **argv, int arg0, const char *cwd) {
     if (strcmp(argv[arg0 + 1], "get") == 0) {
         if (ioctl(fd, DEV_IOCTL_BOOTLOADER_GET, &req) != 0) {
             close(fd);
+            fprintf(stderr, "vga: get failed\n");
             return 1;
         }
         fprintf(stdout, "%u (0x%x)\n", req.value, req.value);
@@ -82,10 +88,12 @@ int cmd_vga(int argc, char **argv, int arg0, const char *cwd) {
         sel.value = 1;
         if (ioctl(fd, DEV_IOCTL_BOOTLOADER_SET, &sel) != 0) {
             close(fd);
+            fprintf(stderr, "vga: set video_output failed\n");
             return 1;
         }
         if (ioctl(fd, DEV_IOCTL_BOOTLOADER_SET, &req) != 0) {
             close(fd);
+            fprintf(stderr, "vga: set mode failed\n");
             return 1;
         }
         close(fd);

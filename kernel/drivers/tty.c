@@ -78,13 +78,14 @@ static char tty_take_input_char(const struct key_event *ev) {
     char c = 0;
     if (keyboard_available()) {
         c = keyboard_getchar();
+        if (c == 0x7F) c = '\b';
         if (c == '\r') c = '\n';
         return c;
     }
     c = tty_event_ascii(ev);
     if (ev) {
         if (ev->scancode == KEY_ENTER) c = '\n';
-        else if (ev->scancode == KEY_BACKSPACE) c = '\b';
+        else if (ev->scancode == KEY_BACKSPACE || ev->scancode == KEY_DEL) c = '\b';
     }
     if (c == '\r') c = '\n';
     return c;
@@ -137,7 +138,7 @@ static void tty_input_cursor(tty_device_t *tty, int visible) {
 }
 
 static void tty_cursor_left_raw(tty_device_t *tty) {
-    if (!tty || tty->type != TTY_VESA) return;
+    if (!tty) return;
     if (tty->cursor_x > 0) {
         tty->cursor_x--;
     } else if (tty->cursor_y > 0) {
@@ -147,7 +148,7 @@ static void tty_cursor_left_raw(tty_device_t *tty) {
 }
 
 static void tty_cursor_right_raw(tty_device_t *tty) {
-    if (!tty || tty->type != TTY_VESA) return;
+    if (!tty) return;
     if (tty->cursor_x + 1 < tty->cols) {
         tty->cursor_x++;
     } else {
@@ -236,7 +237,7 @@ static char tty_event_ascii(const struct key_event *ev) {
     if (!ev) return 0;
     if (ev->ascii) return ev->ascii;
     if (ev->scancode == KEY_ENTER) return '\n';
-    if (ev->scancode == KEY_BACKSPACE) return '\b';
+    if (ev->scancode == KEY_BACKSPACE || ev->scancode == KEY_DEL) return '\b';
     if (ev->scancode == KEY_TAB) return '\t';
     if (ev->ctrl || ev->alt) return 0;
     if (ev->scancode >= 255u) return 0;
@@ -617,7 +618,7 @@ static ssize_t tty_vesa_read(void *ctx, void *buf, size_t size) {
                     continue;
                 }
                 out[0] = c;
-                if (c == '\b') tty_putc_vesa(tty, '\b');
+                if (c == '\b' || c == 0x7F) tty_putc_vesa(tty, '\b');
                 else if (c == '\n' || ((uint8_t)c >= 32u && (uint8_t)c != 127u)) tty_putc_vesa(tty, c);
                 return 1;
             }
@@ -674,7 +675,7 @@ static ssize_t tty_vesa_read(void *ctx, void *buf, size_t size) {
                 return (ssize_t)n;
             }
 
-            if (c == '\b') {
+            if (c == '\b' || c == 0x7F) {
                 if (cursor > 0) {
                     tty_input_cursor(tty, 0);
                     memmove(out + cursor - 1, out + cursor, n - cursor);
@@ -820,7 +821,7 @@ static ssize_t tty_vesa_read(void *ctx, void *buf, size_t size) {
                 return (ssize_t)n;
             }
 
-            if (c == '\b' || ev.scancode == KEY_BACKSPACE) {
+            if (c == '\b' || ev.scancode == KEY_BACKSPACE || ev.scancode == KEY_DEL) {
                 if (cursor > 0) {
                     tty_input_cursor(tty, 0);
                     memmove(out + cursor - 1, out + cursor, n - cursor);
@@ -891,7 +892,7 @@ static ssize_t tty_vga_read(void *ctx, void *buf, size_t size) {
                     continue;
                 }
                 out[0] = c;
-                if (c == '\b') tty_putc_vga(tty, '\b');
+                if (c == '\b' || c == 0x7F) tty_putc_vga(tty, '\b');
                 else if (c == '\n' || ((uint8_t)c >= 32u && (uint8_t)c != 127u)) tty_putc_vga(tty, c);
                 return 1;
             }
@@ -943,7 +944,7 @@ static ssize_t tty_vga_read(void *ctx, void *buf, size_t size) {
                 tty_putc_vga(tty, '\n');
                 return (ssize_t)n;
             }
-            if (c == '\b') {
+            if (c == '\b' || c == 0x7F) {
                 if (n > 0) {
                     n--;
                     tty_putc_vga(tty, '\b');
@@ -975,7 +976,7 @@ static ssize_t tty_vga_read(void *ctx, void *buf, size_t size) {
             tty_putc_vga(tty, '\n');
             return (ssize_t)n;
         }
-        if (ev.scancode == KEY_BACKSPACE) {
+        if (ev.scancode == KEY_BACKSPACE || ev.scancode == KEY_DEL) {
             if (n > 0) {
                 n--;
                 tty_putc_vga(tty, '\b');

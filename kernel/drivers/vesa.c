@@ -18,6 +18,48 @@ static uint32_t rotation_deg = 0;
 #define SWAP(a, b) { typeof(a) temp = a; a = b; b = temp; }
 #define CLAMP(x, min, max) ((x) < (min) ? (min) : ((x) > (max) ? (max) : (x)))
 
+static inline uint32_t scale_component_to_mask(uint8_t value, uint8_t mask_bits) {
+    uint32_t maxv;
+    if (mask_bits == 0u) return 0u;
+    if (mask_bits >= 8u) return (uint32_t)value;
+    maxv = (1u << mask_bits) - 1u;
+    return ((uint32_t)value * maxv + 127u) / 255u;
+}
+
+static inline uint8_t scale_component_from_mask(uint32_t value, uint8_t mask_bits) {
+    uint32_t maxv;
+    if (mask_bits == 0u) return 0u;
+    if (mask_bits >= 8u) return (uint8_t)value;
+    maxv = (1u << mask_bits) - 1u;
+    return (uint8_t)((value * 255u + (maxv / 2u)) / maxv);
+}
+
+static inline uint32_t vesa_pack_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    uint32_t packed = 0u;
+    packed |= (scale_component_to_mask(r, mode_info->red_mask) & ((1u << mode_info->red_mask) - 1u))
+              << mode_info->red_position;
+    packed |= (scale_component_to_mask(g, mode_info->green_mask) & ((1u << mode_info->green_mask) - 1u))
+              << mode_info->green_position;
+    packed |= (scale_component_to_mask(b, mode_info->blue_mask) & ((1u << mode_info->blue_mask) - 1u))
+              << mode_info->blue_position;
+    if (mode_info->reserved_mask != 0u) {
+        packed |= (scale_component_to_mask(a, mode_info->reserved_mask) & ((1u << mode_info->reserved_mask) - 1u))
+                  << mode_info->reserved_position;
+    }
+    return packed;
+}
+
+static inline void vesa_unpack_color(uint32_t packed, uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *a) {
+    uint32_t rm = (mode_info->red_mask != 0u) ? ((1u << mode_info->red_mask) - 1u) : 0u;
+    uint32_t gm = (mode_info->green_mask != 0u) ? ((1u << mode_info->green_mask) - 1u) : 0u;
+    uint32_t bm = (mode_info->blue_mask != 0u) ? ((1u << mode_info->blue_mask) - 1u) : 0u;
+    uint32_t am = (mode_info->reserved_mask != 0u) ? ((1u << mode_info->reserved_mask) - 1u) : 0u;
+    if (r) *r = scale_component_from_mask((packed >> mode_info->red_position) & rm, mode_info->red_mask);
+    if (g) *g = scale_component_from_mask((packed >> mode_info->green_position) & gm, mode_info->green_mask);
+    if (b) *b = scale_component_from_mask((packed >> mode_info->blue_position) & bm, mode_info->blue_mask);
+    if (a) *a = scale_component_from_mask((packed >> mode_info->reserved_position) & am, mode_info->reserved_mask);
+}
+
 bool vesa_init(void) {
     uint32_t min_pitch;
     if (strncmp(vesa_info->signature, "VESA", 4) != 0) return false;
@@ -26,6 +68,7 @@ bool vesa_init(void) {
     if ((mode_info->attributes & 0x0080u) == 0u) return false; 
     if (mode_info->width == 0 || mode_info->height == 0) return false;
     if (mode_info->bpp < 8 || mode_info->bpp > 32) return false;
+    if (mode_info->memory_model != 4u && mode_info->memory_model != 6u) return false;
     if (mode_info->framebuffer < 0x00100000u) return false;
 
     bytes_per_pixel = mode_info->bpp / 8;
@@ -112,26 +155,36 @@ uint32_t vesa_calculate_pixel_offset(uint32_t x, uint32_t y) {
 void vesa_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
     uint32_t px;
     uint32_t py;
+    uint32_t packed;
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t a;
     if (!vesa_is_initialized() || x >= vesa_logical_width() || y >= vesa_logical_height()) return;
     vesa_map_xy(x, y, &px, &py);
     
     uint32_t offset = py * mode_info->pitch + px * bytes_per_pixel;
     uint8_t* pixel = framebuffer + offset;
+    r = (uint8_t)((color >> 16) & 0xFFu);
+    g = (uint8_t)((color >> 8) & 0xFFu);
+    b = (uint8_t)(color & 0xFFu);
+    a = (uint8_t)((color >> 24) & 0xFFu);
+    packed = vesa_pack_color(r, g, b, a);
     
     switch (bytes_per_pixel) {
         case 1:
-            pixel[0] = (uint8_t)color;
+            pixel[0] = (uint8_t)packed;
             break;
         case 2:
-            *(uint16_t*)pixel = (uint16_t)color;
+            *(uint16_t*)pixel = (uint16_t)packed;
             break;
         case 3:
-            pixel[0] = (color >> 16) & 0xFF;
-            pixel[1] = (color >> 8) & 0xFF;
-            pixel[2] = color & 0xFF;
+            pixel[0] = (uint8_t)(packed & 0xFFu);
+            pixel[1] = (uint8_t)((packed >> 8) & 0xFFu);
+            pixel[2] = (uint8_t)((packed >> 16) & 0xFFu);
             break;
         case 4:
-            *(uint32_t*)pixel = color;
+            *(uint32_t*)pixel = packed;
             break;
     }
 }
@@ -139,6 +192,11 @@ void vesa_put_pixel(uint32_t x, uint32_t y, uint32_t color) {
 uint32_t vesa_get_pixel(uint32_t x, uint32_t y) {
     uint32_t px;
     uint32_t py;
+    uint32_t packed = 0;
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    uint8_t a = 0;
     if (!vesa_is_initialized() || x >= vesa_logical_width() || y >= vesa_logical_height()) return 0;
     vesa_map_xy(x, y, &px, &py);
     
@@ -146,23 +204,43 @@ uint32_t vesa_get_pixel(uint32_t x, uint32_t y) {
     uint8_t* pixel = framebuffer + offset;
     
     switch (bytes_per_pixel) {
-        case 1: return pixel[0];
-        case 2: return *(uint16_t*)pixel;
-        case 3: return (pixel[2] << 16) | (pixel[1] << 8) | pixel[0];
-        case 4: return *(uint32_t*)pixel;
+        case 1:
+            packed = pixel[0];
+            break;
+        case 2:
+            packed = *(uint16_t*)pixel;
+            break;
+        case 3:
+            packed = (uint32_t)pixel[0] | ((uint32_t)pixel[1] << 8) | ((uint32_t)pixel[2] << 16);
+            break;
+        case 4:
+            packed = *(uint32_t*)pixel;
+            break;
         default: return 0;
     }
+    vesa_unpack_color(packed, &r, &g, &b, &a);
+    return ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
 }
 
 void vesa_clear(uint32_t color) {
+    uint32_t packed;
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t a;
     if (!vesa_is_initialized()) return;
+    r = (uint8_t)((color >> 16) & 0xFFu);
+    g = (uint8_t)((color >> 8) & 0xFFu);
+    b = (uint8_t)(color & 0xFFu);
+    a = (uint8_t)((color >> 24) & 0xFFu);
+    packed = vesa_pack_color(r, g, b, a);
     
     uint32_t screen_size = mode_info->pitch * mode_info->height;
     if (rotation_deg == 0u && bytes_per_pixel == 4) {
         uint32_t* fb = (uint32_t*)framebuffer;
         uint32_t count = screen_size / 4;
         
-        for (uint32_t i = 0; i < count; i++) fb[i] = color;
+        for (uint32_t i = 0; i < count; i++) fb[i] = packed;
     } else {
         for (uint32_t y = 0; y < vesa_logical_height(); y++) {
             for (uint32_t x = 0; x < vesa_logical_width(); x++) {
@@ -177,7 +255,17 @@ void vesa_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t col
     uint32_t lh;
     uint32_t x_end;
     uint32_t y_end;
+    uint32_t packed;
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t a;
     if (!vesa_is_initialized()) return;
+    r = (uint8_t)((color >> 16) & 0xFFu);
+    g = (uint8_t)((color >> 8) & 0xFFu);
+    b = (uint8_t)(color & 0xFFu);
+    a = (uint8_t)((color >> 24) & 0xFFu);
+    packed = vesa_pack_color(r, g, b, a);
     lw = vesa_logical_width();
     lh = vesa_logical_height();
     x_end = MIN(x + w, lw);
@@ -189,7 +277,7 @@ void vesa_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t col
             uint32_t width = x_end - x;
             
             for (uint32_t cx = 0; cx < width; cx++) {
-                line[cx] = color;
+                line[cx] = packed;
             }
         }
     } else {

@@ -8,10 +8,18 @@
 int cmd_lsblk(int argc, char **argv, int arg0, const char *cwd) {
     char listbuf[CMD_BUF_SZ];
     int32_t n;
-    (void)argc; (void)argv; (void)arg0; (void)cwd;
+    (void)cwd;
+    if (arg0 + 1 < argc) {
+        fprintf(stderr, "usage: lsblk\n");
+        return 1;
+    }
+    (void)argv;
 
     n = list("/dev/disk", listbuf, sizeof(listbuf));
-    if (n < 0) return 1;
+    if (n < 0) {
+        fprintf(stderr, "lsblk: cannot list /dev/disk\n");
+        return 1;
+    }
     fprintf(stdout, "NAME SECTORS SIZE TYPE MOUNTPOINT\n");
 
     {

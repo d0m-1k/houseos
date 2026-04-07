@@ -224,7 +224,7 @@ static void user_boot_task(void *arg) {
         task_exit();
     }
     sti();
-    jump_to_user_image_compat(entry, user_esp);
+    jump_to_ring3(entry, user_esp, 0x202u);
     task_exit();
 }
 
@@ -243,12 +243,10 @@ void kmain(void) {
     tss_init(0x00070000u);
 
     KSERIAL("kmain: video init\n");
-#if CONFIG_GFX_BACKEND_VESA
+    /* Try VESA at runtime regardless of compile-time backend choice.
+       This keeps bootcfg video mode and kernel console backend in sync. */
     vesa_ok = vesa_init() ? 1 : 0;
     if (!vesa_ok) tty_klog("warn: vesa init failed, using vga\n");
-#else
-    vesa_ok = 0;
-#endif
 
     KSERIAL("kmain: idt_init\n");
     idt_init();

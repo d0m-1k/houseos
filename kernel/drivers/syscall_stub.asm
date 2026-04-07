@@ -17,14 +17,16 @@ syscall_handler:
     mov ecx, [esp + 8]
     mov edx, [esp + 12]
     lea esi, [esp + 28]
+    lea edi, [esp + 0]
 
+    push edi
     push esi
     push edx
     push ecx
     push ebx
     push eax
     call do_syscall_impl
-    add esp, 20
+    add esp, 24
 
     mov [esp + 0], eax
 

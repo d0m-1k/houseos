@@ -4,7 +4,7 @@ ROOTFS_STAGE := $(BUILD_DIR)/rootfs
 
 PROGRAM_DIRS := $(sort $(patsubst %/,%,$(dir $(wildcard */Makefile))))
 APP_DIRS := $(filter-out stdlib,$(PROGRAM_DIRS))
-APP_DIRS := $(filter-out libs fb_demo gfxd guishell settings taskmgr terminal composd wmgrd,$(APP_DIRS))
+APP_DIRS := $(filter-out fb_demo gfxd guishell settings taskmgr terminal composd wmgrd,$(APP_DIRS))
 
 .PHONY: all clean stdlib apps stage
 

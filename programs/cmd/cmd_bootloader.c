@@ -19,7 +19,10 @@ int cmd_bootloader(int argc, char **argv, int arg0, const char *cwd) {
     }
     sub = argv[arg0 + 1];
     fd = open("/dev/bootloader", 0);
-    if (fd < 0) return 1;
+    if (fd < 0) {
+        fprintf(stderr, "bootloader: cannot open /dev/bootloader\n");
+        return 1;
+    }
     if (arg0 + 2 >= argc) {
         close(fd);
         fprintf(stderr, "usage: bootloader set <prop_name> <value> | bootloader set root <auto|disk0> | bootloader get <prop_name>\n");
@@ -56,6 +59,7 @@ int cmd_bootloader(int argc, char **argv, int arg0, const char *cwd) {
         }
         if (ioctl(fd, DEV_IOCTL_BOOTLOADER_SET, &req) != 0) {
             close(fd);
+            fprintf(stderr, "bootloader: set failed\n");
             return 1;
         }
         close(fd);
@@ -66,6 +70,7 @@ int cmd_bootloader(int argc, char **argv, int arg0, const char *cwd) {
         if (strcmp(prop, "root") == 0) strcpy(req.prop_name, "root_disk");
         if (ioctl(fd, DEV_IOCTL_BOOTLOADER_GET, &req) != 0) {
             close(fd);
+            fprintf(stderr, "bootloader: get failed\n");
             return 1;
         }
         if (strcmp(req.prop_name, "root_disk") == 0) {

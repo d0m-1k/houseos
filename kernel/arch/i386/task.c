@@ -277,8 +277,10 @@ int task_waitpid(int32_t pid, int32_t *status_out, uint32_t options) {
             if (pid > 0 && (uint32_t)pid != t->pid) continue;
             has_child = 1;
             if (t->state == TASK_TERMINATED) {
-                int32_t st = t->exit_status;
+                int32_t st;
                 uint32_t ret_pid = t->pid;
+                if (t->term_signal != 0) st = (int32_t)(t->term_signal & 0x7Fu);
+                else st = (int32_t)((t->exit_status & 0xFF) << 8);
                 task_release_resources(t);
                 t->pid = 0;
                 t->ppid = 0;

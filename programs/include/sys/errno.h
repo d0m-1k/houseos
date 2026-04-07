@@ -18,5 +18,6 @@
 #define ENOSYS 38
 #define ENOTSUP 95
 #define ETIMEDOUT 110
+#define ESRCH 3
 
 extern int errno;

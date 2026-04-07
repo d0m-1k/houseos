@@ -280,6 +280,7 @@ void shell_run(memfs *filesystem) {
                 break;
 
             case KEY_BACKSPACE:
+            case KEY_DEL:
                 backspace_char();
                 break;
 

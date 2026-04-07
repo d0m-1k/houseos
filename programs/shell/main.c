@@ -297,43 +297,6 @@ static int current_tty_path(char *out, uint32_t cap) {
     return 0;
 }
 
-static const char *path_basename(const char *path) {
-    const char *last = path;
-    if (!path || !path[0]) return "";
-    while (*path) {
-        if (*path == '/') last = path + 1;
-        path++;
-    }
-    return (*last) ? last : "";
-}
-
-static int is_cmd_applet_name(const char *name) {
-    static const char *const applets[] = {
-        "cmd", "echo", "printf", "hexdump", "pwd", "ls", "cat", "grep", "less",
-        "mkdir", "mkfifo", "mksock", "touch", "rm", "rmdir", "cp", "mv", "ln",
-        "tee", "chvt", "ttyinfo", "kbdinfo", "mouseinfo", "reboot", "poweroff",
-        "mount", "umount", "lsblk", "udp", "bootloader", "vesa", "vga"
-    };
-    if (!name || !name[0]) return 0;
-    for (uint32_t i = 0; i < (uint32_t)(sizeof(applets) / sizeof(applets[0])); i++) {
-        if (strcmp(name, applets[i]) == 0) return 1;
-    }
-    return 0;
-}
-
-static int build_cmd_wrapper_cmdline(const char *orig_cmdline, char *out, uint32_t cap) {
-    uint32_t len = 0;
-    if (!out || cap < 2) return -1;
-    out[0] = '\0';
-    if (append_text(out, cap, &len, "--pwd ") != 0) return -1;
-    if (append_quoted_arg(out, cap, &len, g_pwd) != 0) return -1;
-    if (orig_cmdline && orig_cmdline[0]) {
-        if (append_char(out, cap, &len, ' ') != 0) return -1;
-        if (append_text(out, cap, &len, orig_cmdline) != 0) return -1;
-    }
-    return 0;
-}
-
 static int spawn_and_wait(const char *path, const char *cmdline) {
     char tty[64];
     const char *tty_path = "/dev/tty/1";
@@ -377,25 +340,11 @@ static int is_elf_file(const char *path) {
 static int try_exec_from_path(const char *name, const char *cmdline) {
     char full[192];
     char abs_name[160];
-    char wrapped[768];
-    const char *base;
 
     if (strchr(name, '/')) {
         if (normalize_path(name, abs_name, sizeof(abs_name)) != 0) return -1;
-        base = path_basename(abs_name);
-        if (strcmp(abs_name, "/bin/cmd") != 0 && is_cmd_applet_name(base)) {
-            if (!is_elf_file("/bin/cmd")) return -1;
-            if (build_cmd_wrapper_cmdline(cmdline, wrapped, sizeof(wrapped)) != 0) return -1;
-            return spawn_and_wait("/bin/cmd", wrapped);
-        }
         if (!is_elf_file(abs_name)) return -1;
         return spawn_and_wait(abs_name, cmdline);
-    }
-
-    if (is_cmd_applet_name(name)) {
-        if (!is_elf_file("/bin/cmd")) return -1;
-        if (build_cmd_wrapper_cmdline(cmdline, wrapped, sizeof(wrapped)) != 0) return -1;
-        return spawn_and_wait("/bin/cmd", wrapped);
     }
 
     {

@@ -8,6 +8,7 @@
 #define ET_EXEC 2
 #define EM_386 3
 #define PT_LOAD 1
+#define PT_INTERP 3
 
 #define USER_ELF_MIN_VADDR USER_VADDR_BASE
 #define USER_ELF_MAX_VADDR (USER_VADDR_BASE + USER_VADDR_SIZE)
@@ -49,12 +50,13 @@ static int range_ok(uint32_t vaddr, uint32_t size) {
     return 1;
 }
 
-int elf_load_from_vfs(vfs_t *fs, const char *path, uint32_t *entry_out) {
+int elf_load_from_vfs_ex(vfs_t *fs, const char *path, uint32_t *entry_out, char *interp_out, uint32_t interp_cap) {
     g_elf_last_error = 0;
     if (!fs || !path || !entry_out) {
         g_elf_last_error = 1;
         return -1;
     }
+    if (interp_out && interp_cap > 0) interp_out[0] = '\0';
 
     vfs_info_t info;
     if (vfs_get_info(fs, path, &info) != 0) {
@@ -98,6 +100,31 @@ int elf_load_from_vfs(vfs_t *fs, const char *path, uint32_t *entry_out) {
 
     elf32_phdr_t *ph = (elf32_phdr_t*)(file + eh->e_phoff);
     for (uint16_t i = 0; i < eh->e_phnum; i++) {
+        if (ph[i].p_type != PT_INTERP) continue;
+        if (!interp_out || interp_cap < 2u) {
+            g_elf_last_error = 12;
+            kfree(file);
+            return -1;
+        }
+        if (ph[i].p_offset + ph[i].p_filesz > info.size || ph[i].p_filesz < 2u) {
+            g_elf_last_error = 13;
+            kfree(file);
+            return -1;
+        }
+        {
+            uint32_t n = ph[i].p_filesz;
+            if (n >= interp_cap) n = interp_cap - 1u;
+            memcpy(interp_out, file + ph[i].p_offset, n);
+            interp_out[n] = '\0';
+        }
+        if (interp_out[0] != '/') {
+            g_elf_last_error = 14;
+            kfree(file);
+            return -1;
+        }
+    }
+
+    for (uint16_t i = 0; i < eh->e_phnum; i++) {
         if (ph[i].p_type != PT_LOAD) continue;
         if (ph[i].p_memsz < ph[i].p_filesz) {
             g_elf_last_error = 8;
@@ -128,6 +155,10 @@ int elf_load_from_vfs(vfs_t *fs, const char *path, uint32_t *entry_out) {
     *entry_out = eh->e_entry;
     kfree(file);
     return 0;
+}
+
+int elf_load_from_vfs(vfs_t *fs, const char *path, uint32_t *entry_out) {
+    return elf_load_from_vfs_ex(fs, path, entry_out, NULL, 0u);
 }
 
 int elf_get_last_error(void) {

@@ -1,4 +1,7 @@
 #include <syscall.h>
+#include <stdarg.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 int errno = 0;
 
@@ -46,31 +49,58 @@ void exit(int code) {
     for (;;) __asm__ __volatile__("hlt");
 }
 
-int32_t read(int fd, void *buf, uint32_t size) { return syscall_ret(syscall3(SYSCALL_READ, (uint32_t)fd, (uint32_t)buf, size)); }
-int32_t write(int fd, const void *buf, uint32_t size) { return syscall_ret(syscall3(SYSCALL_WRITE, (uint32_t)fd, (uint32_t)buf, size)); }
+ssize_t read(int fd, void *buf, size_t size) { return syscall_ret(syscall3(SYSCALL_READ, (uint32_t)fd, (uint32_t)buf, (uint32_t)size)); }
+ssize_t write(int fd, const void *buf, size_t size) { return syscall_ret(syscall3(SYSCALL_WRITE, (uint32_t)fd, (uint32_t)buf, (uint32_t)size)); }
 int32_t exec(const char *path) { return syscall_ret(syscall1(SYSCALL_EXEC, (uint32_t)path)); }
 int32_t execv(const char *path, const char *cmdline) { return syscall_ret(syscall2(SYSCALL_EXECV, (uint32_t)path, (uint32_t)cmdline)); }
 int32_t ioctl(int fd, uint32_t req, void *arg) { return syscall_ret(syscall3(SYSCALL_IOCTL, (uint32_t)fd, req, (uint32_t)arg)); }
-int32_t open(const char *path, uint32_t flags) { return syscall_ret(syscall2(SYSCALL_OPEN, (uint32_t)path, flags)); }
+int32_t open(const char *path, int flags, ...) { return syscall_ret(syscall2(SYSCALL_OPEN, (uint32_t)path, (uint32_t)flags)); }
 int32_t close(int fd) { return syscall_ret(syscall1(SYSCALL_CLOSE, (uint32_t)fd)); }
-int32_t mkdir(const char *path) { return syscall_ret(syscall1(SYSCALL_MKDIR, (uint32_t)path)); }
+int32_t mkdir(const char *path, ...) { return syscall_ret(syscall1(SYSCALL_MKDIR, (uint32_t)path)); }
 int32_t mkfifo(const char *path) { return syscall_ret(syscall1(SYSCALL_MKFIFO, (uint32_t)path)); }
 int32_t mksock(const char *path) { return syscall_ret(syscall1(SYSCALL_MKSOCK, (uint32_t)path)); }
 int32_t unlink(const char *path) { return syscall_ret(syscall1(SYSCALL_UNLINK, (uint32_t)path)); }
 int32_t rmdir(const char *path) { return syscall_ret(syscall1(SYSCALL_RMDIR, (uint32_t)path)); }
 int32_t link(const char *oldpath, const char *newpath) { return syscall_ret(syscall2(SYSCALL_LINK, (uint32_t)oldpath, (uint32_t)newpath)); }
 int32_t list(const char *path, char *buf, uint32_t size) { return syscall_ret(syscall3(SYSCALL_LIST, (uint32_t)path, (uint32_t)buf, size)); }
-int32_t append(int fd, const void *buf, uint32_t size) { return syscall_ret(syscall3(SYSCALL_APPEND, (uint32_t)fd, (uint32_t)buf, size)); }
+ssize_t append(int fd, const void *buf, size_t size) { return syscall_ret(syscall3(SYSCALL_APPEND, (uint32_t)fd, (uint32_t)buf, (uint32_t)size)); }
 int32_t spawn(const char *path, const char *tty) { return syscall_ret(syscall2(SYSCALL_SPAWN, (uint32_t)path, (uint32_t)tty)); }
 int32_t spawnv(const char *path, const char *tty, const char *cmdline) { return syscall_ret(syscall3(SYSCALL_SPAWNV, (uint32_t)path, (uint32_t)tty, (uint32_t)cmdline)); }
 int32_t task_state(int32_t pid) { return syscall_ret(syscall1(SYSCALL_TASK_STATE, (uint32_t)pid)); }
-int32_t task_kill(int32_t pid) { return syscall_ret(syscall1(SYSCALL_TASK_KILL, (uint32_t)pid)); }
+int32_t task_kill(int32_t pid, int32_t sig) {
+    return syscall_ret(syscall2(SYSCALL_TASK_KILL, (uint32_t)pid, (uint32_t)sig));
+}
 int32_t waitpid(int32_t pid, int32_t *status, uint32_t options) {
     return syscall_ret(syscall3(SYSCALL_WAITPID, (uint32_t)pid, (uint32_t)status, options));
 }
 int32_t mount(const char *fs_name, const char *mount_path) { return syscall_ret(syscall2(SYSCALL_MOUNT, (uint32_t)fs_name, (uint32_t)mount_path)); }
 int32_t umount(const char *mount_path) { return syscall_ret(syscall1(SYSCALL_UMOUNT, (uint32_t)mount_path)); }
 int32_t list_mounts(char *buf, uint32_t size) { return syscall_ret(syscall2(SYSCALL_LIST_MOUNTS, (uint32_t)buf, size)); }
+int32_t dup(int32_t oldfd) { return syscall_ret(syscall1(SYSCALL_DUP, (uint32_t)oldfd)); }
+int32_t dup2(int32_t oldfd, int32_t newfd) { return syscall_ret(syscall2(SYSCALL_DUP2, (uint32_t)oldfd, (uint32_t)newfd)); }
+int32_t getpid(void) { return syscall_ret(syscall0(SYSCALL_GETPID)); }
+int32_t getppid(void) { return syscall_ret(syscall0(SYSCALL_GETPPID)); }
+int32_t stat(const char *path, struct stat *st) { return syscall_ret(syscall2(SYSCALL_STAT, (uint32_t)path, (uint32_t)st)); }
+int32_t fstat(int fd, struct stat *st) { return syscall_ret(syscall2(SYSCALL_FSTAT, (uint32_t)fd, (uint32_t)st)); }
+int32_t lseek(int fd, int32_t offset, int whence) {
+    return syscall_ret(syscall3(SYSCALL_LSEEK, (uint32_t)fd, (uint32_t)offset, (uint32_t)whence));
+}
+int32_t pipe(int fd[2]) { return syscall_ret(syscall1(SYSCALL_PIPE, (uint32_t)fd)); }
+int32_t fcntl(int fd, int cmd, ...) {
+    uint32_t arg = 0;
+    if (cmd == F_DUPFD || cmd == F_SETFD || cmd == F_SETFL) {
+        va_list ap;
+        va_start(ap, cmd);
+        arg = va_arg(ap, uint32_t);
+        va_end(ap);
+    }
+    return syscall_ret(syscall3(SYSCALL_FCNTL, (uint32_t)fd, (uint32_t)cmd, arg));
+}
+int32_t fork(void) { return syscall_ret(syscall0(SYSCALL_FORK)); }
+int32_t sys_poll_raw(void *fds, uint32_t nfds, int32_t timeout_ms) {
+    return syscall_ret(syscall3(SYSCALL_POLL, (uint32_t)fds, nfds, (uint32_t)timeout_ms));
+}
+int32_t sys_select_raw(void *req) { return syscall_ret(syscall1(SYSCALL_SELECT, (uint32_t)req)); }
 void init_spawn_shells(void) { (void)syscall0(SYSCALL_INIT_SPAWN_SHELLS); }
 
 int32_t socket(int32_t domain, int32_t type, int32_t protocol) {

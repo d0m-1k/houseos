@@ -12,8 +12,15 @@ int cmd_cat(int argc, char **argv, int arg0, const char *cwd) {
         if (n > 0) write(fileno(stdout), buf, (uint32_t)n);
         return 0;
     }
+    if (arg0 + 2 < argc) {
+        fprintf(stderr, "usage: cat [file]\n");
+        return 1;
+    }
 
-    if (normalize_path(cwd, argv[arg0 + 1], path, sizeof(path)) != 0) return 1;
+    if (normalize_path(cwd, argv[arg0 + 1], path, sizeof(path)) != 0) {
+        fprintf(stderr, "cat: bad path: %s\n", argv[arg0 + 1]);
+        return 1;
+    }
     {
         int fd = open(path, 0);
         int32_t n;

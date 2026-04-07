@@ -47,6 +47,18 @@ enum {
     SYS_SETSOCKOPT = 30,
     SYS_TASK_KILL = 31,
     SYS_WAITPID = 32,
+    SYS_DUP = 33,
+    SYS_DUP2 = 34,
+    SYS_GETPID = 35,
+    SYS_GETPPID = 36,
+    SYS_STAT = 37,
+    SYS_FSTAT = 38,
+    SYS_LSEEK = 39,
+    SYS_PIPE = 40,
+    SYS_FCNTL = 41,
+    SYS_FORK = 42,
+    SYS_POLL = 43,
+    SYS_SELECT = 44,
 };
 
 vfs_t *g_root_fs_for_syscalls = NULL;
@@ -62,9 +74,62 @@ enum {
 typedef struct {
     uint8_t used;
     uint8_t kind;
+    uint8_t pipe_auto_unlink;
+    uint8_t reserved0;
     int16_t sock_id;
+    uint16_t reserved1;
+    uint32_t fd_flags;
+    uint32_t open_flags;
+    uint32_t offset;
     char path[256];
 } fd_entry_t;
+
+typedef struct {
+    uint32_t st_mode;
+    int32_t st_size;
+} syscall_stat_t;
+
+typedef struct {
+    uint32_t eax;
+    uint32_t ebx;
+    uint32_t ecx;
+    uint32_t edx;
+    uint32_t esi;
+    uint32_t edi;
+    uint32_t ebp;
+} syscall_saved_regs_t;
+
+typedef struct {
+    uint32_t user_eip;
+    uint32_t user_esp;
+    uint32_t user_eflags;
+    uint32_t user_cr3;
+    uint32_t user_slot;
+    uint32_t user_phys;
+    uint32_t ebx;
+    uint32_t ecx;
+    uint32_t edx;
+    uint32_t esi;
+    uint32_t edi;
+    uint32_t ebp;
+    char tty_path[64];
+    char prog_path[256];
+    char cmdline[512];
+} fork_child_ctx_t;
+
+typedef struct {
+    int32_t fd;
+    int16_t events;
+    int16_t revents;
+} syscall_pollfd_t;
+
+typedef struct {
+    int32_t nfds;
+    uint32_t *readfds;
+    uint32_t *writefds;
+    uint32_t *exceptfds;
+    int32_t timeout_ms;
+} syscall_select_req_t;
 
 typedef struct {
     char path[256];
@@ -139,9 +204,42 @@ typedef struct {
 
 static udp_socket_t g_udp_sockets[UDP_MAX_SOCKETS];
 static uint16_t g_udp_next_ephemeral = UDP_EPHEMERAL_START;
+static uint32_t g_pipe_seq = 1;
+
+static int fd_has_path_ref(const char *path, int exclude_fd);
 
 #define USER_ARG_MAX 32
 #define USER_ARG_TOKEN 128
+#define O_CREAT 0x0040u
+#define O_APPEND 0x0400u
+#define O_NONBLOCK 0x0800u
+
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
+#define F_DUPFD 0
+#define F_GETFD 1
+#define F_SETFD 2
+#define F_GETFL 3
+#define F_SETFL 4
+#define FD_CLOEXEC 1u
+
+#define POLLIN   0x0001
+#define POLLOUT  0x0004
+#define POLLERR  0x0008
+#define POLLHUP  0x0010
+#define POLLNVAL 0x0020
+
+#define S_IFMT   0170000u
+#define S_IFIFO  0010000u
+#define S_IFCHR  0020000u
+#define S_IFDIR  0040000u
+#define S_IFREG  0100000u
+#define S_IFSOCK 0140000u
+#define S_IRUSR  0400u
+#define S_IWUSR  0200u
+#define S_IXUSR  0100u
 
 static int is_space(char c) {
     return (c == ' ' || c == '\t' || c == '\n' || c == '\r');
@@ -490,6 +588,104 @@ static int copy_user_string(const char *user, char *out, uint32_t cap) {
     return -1;
 }
 
+static int append_text_safe(char *dst, uint32_t cap, uint32_t *len, const char *src) {
+    uint32_t i = 0;
+    if (!dst || !len || !src) return -1;
+    while (src[i]) {
+        if (*len + 1u >= cap) return -1;
+        dst[*len] = src[i];
+        (*len)++;
+        i++;
+    }
+    dst[*len] = '\0';
+    return 0;
+}
+
+static int append_char_safe(char *dst, uint32_t cap, uint32_t *len, char c) {
+    if (!dst || !len) return -1;
+    if (*len + 1u >= cap) return -1;
+    dst[*len] = c;
+    (*len)++;
+    dst[*len] = '\0';
+    return 0;
+}
+
+static const char *path_basename_local(const char *path) {
+    const char *last = path;
+    if (!path) return "";
+    while (*path) {
+        if (*path == '/') last = path + 1;
+        path++;
+    }
+    return last;
+}
+
+static const char *skip_first_token(const char *s) {
+    if (!s) return s;
+    while (*s && is_space(*s)) s++;
+    while (*s && !is_space(*s)) s++;
+    while (*s && is_space(*s)) s++;
+    return s;
+}
+
+static int build_interp_cmdline(const char *interp_path, const char *target_path, const char *orig_cmdline, char *out, uint32_t out_cap) {
+    uint32_t len = 0;
+    const char *tail = orig_cmdline;
+    const char *base = path_basename_local(target_path);
+    if (!interp_path || !target_path || !out || out_cap < 4u) return -1;
+    out[0] = '\0';
+    if (append_text_safe(out, out_cap, &len, interp_path) != 0) return -1;
+    if (append_char_safe(out, out_cap, &len, ' ') != 0) return -1;
+    if (append_text_safe(out, out_cap, &len, target_path) != 0) return -1;
+    if (tail && tail[0]) {
+        while (*tail && is_space(*tail)) tail++;
+        if (strncmp(tail, target_path, strlen(target_path)) == 0 &&
+            (tail[strlen(target_path)] == '\0' || is_space(tail[strlen(target_path)]))) {
+            tail = skip_first_token(tail);
+        } else if (base[0] != '\0' &&
+                   strncmp(tail, base, strlen(base)) == 0 &&
+                   (tail[strlen(base)] == '\0' || is_space(tail[strlen(base)]))) {
+            tail = skip_first_token(tail);
+        }
+    }
+    if (tail && tail[0]) {
+        if (append_char_safe(out, out_cap, &len, ' ') != 0) return -1;
+        if (append_text_safe(out, out_cap, &len, tail) != 0) return -1;
+    }
+    return 0;
+}
+
+static int resolve_exec_entry(
+    const char *prog_path,
+    const char *orig_cmdline,
+    uint32_t *entry_out,
+    char *stack_cmdline,
+    uint32_t stack_cmdline_cap
+) {
+    char interp[256];
+    uint32_t entry = 0;
+    if (!prog_path || !entry_out || !stack_cmdline || stack_cmdline_cap < 2u) return -1;
+    stack_cmdline[0] = '\0';
+
+    if (elf_load_from_vfs_ex(g_root_fs_for_syscalls, prog_path, &entry, interp, sizeof(interp)) != 0) return -1;
+    if (interp[0] != '\0') {
+        uint32_t interp_entry = 0;
+        if (elf_load_from_vfs(g_root_fs_for_syscalls, interp, &interp_entry) != 0) return -1;
+        if (build_interp_cmdline(interp, prog_path, orig_cmdline, stack_cmdline, stack_cmdline_cap) != 0) return -1;
+        *entry_out = interp_entry;
+        return 0;
+    }
+
+    if (orig_cmdline && orig_cmdline[0]) {
+        strncpy(stack_cmdline, orig_cmdline, stack_cmdline_cap - 1u);
+        stack_cmdline[stack_cmdline_cap - 1u] = '\0';
+    } else {
+        stack_cmdline[0] = '\0';
+    }
+    *entry_out = entry;
+    return 0;
+}
+
 static int normalize_mount_path_local(const char *in, char *out, uint32_t cap) {
     uint32_t n;
     if (!in || !out || cap < 2) return -1;
@@ -517,9 +713,21 @@ static void fd_table_init(fd_entry_t *fds, uint8_t *done, const char *tty_path) 
     fds[0].kind = FD_KIND_VFS;
     fds[1].kind = FD_KIND_VFS;
     fds[2].kind = FD_KIND_VFS;
+    fds[0].pipe_auto_unlink = 0;
+    fds[1].pipe_auto_unlink = 0;
+    fds[2].pipe_auto_unlink = 0;
     fds[0].sock_id = -1;
     fds[1].sock_id = -1;
     fds[2].sock_id = -1;
+    fds[0].open_flags = 0;
+    fds[1].open_flags = 0;
+    fds[2].open_flags = 0;
+    fds[0].fd_flags = 0;
+    fds[1].fd_flags = 0;
+    fds[2].fd_flags = 0;
+    fds[0].offset = 0;
+    fds[1].offset = 0;
+    fds[2].offset = 0;
     *done = 1;
 }
 
@@ -549,22 +757,38 @@ void syscall_bind_stdio(const char *path) {
     fds[0].kind = FD_KIND_VFS;
     fds[1].kind = FD_KIND_VFS;
     fds[2].kind = FD_KIND_VFS;
+    fds[0].pipe_auto_unlink = 0;
+    fds[1].pipe_auto_unlink = 0;
+    fds[2].pipe_auto_unlink = 0;
     fds[0].sock_id = -1;
     fds[1].sock_id = -1;
     fds[2].sock_id = -1;
+    fds[0].open_flags = 0;
+    fds[1].open_flags = 0;
+    fds[2].open_flags = 0;
+    fds[0].fd_flags = 0;
+    fds[1].fd_flags = 0;
+    fds[2].fd_flags = 0;
+    fds[0].offset = 0;
+    fds[1].offset = 0;
+    fds[2].offset = 0;
 }
 
 void syscall_set_devfs_ctx(void *ctx) {
     g_devfs_ctx = ctx;
 }
 
-static int fd_alloc(const char *path) {
+static int fd_alloc(const char *path, uint32_t open_flags) {
     fd_entry_t *fds = fd_current();
     for (int i = 3; i < FD_MAX; i++) {
         if (!fds[i].used) {
             fds[i].used = 1;
             fds[i].kind = FD_KIND_VFS;
+            fds[i].pipe_auto_unlink = 0;
             fds[i].sock_id = -1;
+            fds[i].open_flags = open_flags;
+            fds[i].fd_flags = 0;
+            fds[i].offset = 0;
             strncpy(fds[i].path, path, sizeof(fds[i].path) - 1);
             fds[i].path[sizeof(fds[i].path) - 1] = '\0';
             return i;
@@ -579,12 +803,82 @@ static int fd_alloc_udp(int sid) {
         if (!fds[i].used) {
             fds[i].used = 1;
             fds[i].kind = FD_KIND_UDP;
+            fds[i].pipe_auto_unlink = 0;
             fds[i].sock_id = (int16_t)sid;
+            fds[i].open_flags = 0;
+            fds[i].fd_flags = 0;
+            fds[i].offset = 0;
             fds[i].path[0] = '\0';
             return i;
         }
     }
     return -1;
+}
+
+static int fd_dup_from_to(uint32_t oldfd, uint32_t newfd, int fixed_target) {
+    fd_entry_t *fds = fd_current();
+    uint32_t dst = newfd;
+
+    if (oldfd >= FD_MAX || !fds[oldfd].used) return -K_EBADF;
+    if (fds[oldfd].kind == FD_KIND_UDP) return -K_ENOTSUP;
+
+    if (!fixed_target) {
+        for (dst = 0; dst < FD_MAX; dst++) {
+            if (!fds[dst].used) break;
+        }
+        if (dst >= FD_MAX) return -K_ENFILE;
+    } else {
+        if (dst >= FD_MAX) return -K_EBADF;
+        if (dst == oldfd) return (int)dst;
+        if (fds[dst].used) {
+            if (fds[dst].kind == FD_KIND_UDP && fds[dst].sock_id >= 0) {
+                udp_socket_free((int)fds[dst].sock_id);
+            }
+            fds[dst].used = 0;
+            fds[dst].kind = FD_KIND_VFS;
+            fds[dst].pipe_auto_unlink = 0;
+            fds[dst].sock_id = -1;
+            fds[dst].fd_flags = 0;
+            fds[dst].open_flags = 0;
+            fds[dst].offset = 0;
+            fds[dst].path[0] = '\0';
+        }
+    }
+
+    fds[dst].used = 1;
+    fds[dst].kind = fds[oldfd].kind;
+    fds[dst].pipe_auto_unlink = fds[oldfd].pipe_auto_unlink;
+    fds[dst].sock_id = fds[oldfd].sock_id;
+    fds[dst].fd_flags = 0;
+    fds[dst].open_flags = fds[oldfd].open_flags;
+    fds[dst].offset = fds[oldfd].offset;
+    strncpy(fds[dst].path, fds[oldfd].path, sizeof(fds[dst].path) - 1);
+    fds[dst].path[sizeof(fds[dst].path) - 1] = '\0';
+    return (int)dst;
+}
+
+static void close_cloexec_fds(void) {
+    fd_entry_t *fds = fd_current();
+    for (int i = 3; i < FD_MAX; i++) {
+        if (!fds[i].used) continue;
+        if ((fds[i].fd_flags & FD_CLOEXEC) == 0) continue;
+        if (fds[i].kind == FD_KIND_UDP && fds[i].sock_id >= 0) {
+            udp_socket_free((int)fds[i].sock_id);
+        }
+        if (fds[i].kind == FD_KIND_VFS &&
+            fds[i].pipe_auto_unlink &&
+            !fd_has_path_ref(fds[i].path, i)) {
+            (void)vfs_unlink(g_root_fs_for_syscalls, fds[i].path);
+        }
+        fds[i].used = 0;
+        fds[i].kind = FD_KIND_VFS;
+        fds[i].pipe_auto_unlink = 0;
+        fds[i].sock_id = -1;
+        fds[i].fd_flags = 0;
+        fds[i].open_flags = 0;
+        fds[i].offset = 0;
+        fds[i].path[0] = '\0';
+    }
 }
 
 static const char *fd_path(uint32_t fd) {
@@ -600,10 +894,61 @@ static int fd_udp_sid(uint32_t fd) {
     return (int)fds[fd].sock_id;
 }
 
+static int fd_has_path_ref(const char *path, int exclude_fd) {
+    fd_entry_t *fds = fd_current();
+    if (!path || path[0] == '\0') return 0;
+    for (int i = 0; i < FD_MAX; i++) {
+        if (i == exclude_fd) continue;
+        if (!fds[i].used || fds[i].kind != FD_KIND_VFS) continue;
+        if (strcmp(fds[i].path, path) == 0) return 1;
+    }
+    return 0;
+}
+
+static uint32_t vfs_mode_from_info(const vfs_info_t *info) {
+    if (!info) return 0;
+    switch (info->type) {
+        case VFS_NODE_DIR: return S_IFDIR | S_IRUSR | S_IWUSR | S_IXUSR;
+        case VFS_NODE_FIFO: return S_IFIFO | S_IRUSR | S_IWUSR;
+        case VFS_NODE_SOCKET: return S_IFSOCK | S_IRUSR | S_IWUSR;
+        case VFS_NODE_DEVICE:
+        case VFS_NODE_CHARDEV:
+        case VFS_NODE_BLOCKDEV: return S_IFCHR | S_IRUSR | S_IWUSR;
+        case VFS_NODE_FILE:
+        default: return S_IFREG | S_IRUSR | S_IWUSR;
+    }
+}
+
+static int16_t fd_poll_revents(int32_t fd, int16_t events) {
+    const char *path;
+    vfs_info_t info;
+    int16_t revents = 0;
+    if (fd < 0 || (uint32_t)fd >= FD_MAX) return POLLNVAL;
+    path = fd_path((uint32_t)fd);
+    if (!path) {
+        int sid = fd_udp_sid((uint32_t)fd);
+        if (sid < 0) return POLLNVAL;
+        if ((events & POLLIN) && g_udp_sockets[sid].q_len > 0) revents |= POLLIN;
+        if (events & POLLOUT) revents |= POLLOUT;
+        return revents;
+    }
+    if (vfs_get_info(g_root_fs_for_syscalls, path, &info) != 0) return POLLNVAL;
+    if (events & POLLOUT) revents |= POLLOUT;
+    if (events & POLLIN) {
+        if (info.type == VFS_NODE_FIFO || info.type == VFS_NODE_SOCKET) {
+            if (info.size > 0) revents |= POLLIN;
+        } else {
+            revents |= POLLIN;
+        }
+    }
+    return revents;
+}
+
 static void spawned_user_task(void *arg) {
     spawn_req_t *req = (spawn_req_t*)arg;
     uint32_t entry = 0;
     uint32_t user_esp = USER_STACK_TOP;
+    char stack_cmdline[512];
     if (!req) task_exit();
     syscall_bind_stdio(req->tty);
     if (current_task) {
@@ -619,20 +964,46 @@ static void spawned_user_task(void *arg) {
         task_exit();
     }
 
-    if (!g_root_fs_for_syscalls || elf_load_from_vfs(g_root_fs_for_syscalls, req->path, &entry) != 0) {
+    if (!g_root_fs_for_syscalls ||
+        resolve_exec_entry(req->path, req->cmdline[0] ? req->cmdline : NULL, &entry, stack_cmdline, sizeof(stack_cmdline)) != 0) {
         (void)elf_get_last_error();
         kfree(req);
         task_exit();
     }
 
-    if (build_user_stack_from_cmdline(req->cmdline[0] ? req->cmdline : NULL, &user_esp) != 0) {
+    if (build_user_stack_from_cmdline(stack_cmdline[0] ? stack_cmdline : NULL, &user_esp) != 0) {
         kfree(req);
         task_exit();
     }
 
     kfree(req);
-    jump_to_user_image_compat(entry, user_esp);
+    jump_to_ring3(entry, user_esp, 0x202u);
     task_exit();
+}
+
+static void spawned_fork_child(void *arg) {
+    fork_child_ctx_t *ctx = (fork_child_ctx_t*)arg;
+    fork_child_ctx_t local;
+    if (!ctx || !current_task) task_exit();
+    memcpy(&local, ctx, sizeof(local));
+    kfree(ctx);
+
+    current_task->cr3 = local.user_cr3;
+    current_task->user_slot = local.user_slot;
+    current_task->user_phys_base = local.user_phys;
+    strncpy(current_task->tty_path, local.tty_path, sizeof(current_task->tty_path) - 1);
+    current_task->tty_path[sizeof(current_task->tty_path) - 1] = '\0';
+    strncpy(current_task->prog_path, local.prog_path, sizeof(current_task->prog_path) - 1);
+    current_task->prog_path[sizeof(current_task->prog_path) - 1] = '\0';
+    strncpy(current_task->cmdline, local.cmdline, sizeof(current_task->cmdline) - 1);
+    current_task->cmdline[sizeof(current_task->cmdline) - 1] = '\0';
+    mm_switch_cr3(current_task->cr3);
+
+    sti();
+    jump_to_ring3_state(
+        local.user_eip, local.user_esp, local.user_eflags,
+        0, local.ebx, local.ecx, local.edx, local.esi, local.edi, local.ebp
+    );
 }
 
 static int spawn_user_program_ex(const char *path, const char *tty, const char *cmdline) {
@@ -664,7 +1035,8 @@ static int spawn_user_program(const char *path, const char *tty) {
 }
 
 uint32_t do_syscall_impl(
-    uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx, struct interrupt_frame *f
+    uint32_t eax, uint32_t ebx, uint32_t ecx, uint32_t edx,
+    struct interrupt_frame *f, syscall_saved_regs_t *regs
 ) {
     fd_current();
 
@@ -685,23 +1057,78 @@ uint32_t do_syscall_impl(
             task_exit();
             return 0;
         case SYS_READ: {
+            fd_entry_t *fds = fd_current();
             const char *path;
+            vfs_info_t info;
             if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
             if (!ecx || edx == 0) return 0;
             path = fd_path(ebx);
             if (!path) return (uint32_t)(-K_EBADF);
+            if (vfs_get_info(g_root_fs_for_syscalls, path, &info) == 0 && info.type == VFS_NODE_FILE) {
+                uint32_t off = fds[ebx].offset;
+                uint32_t to_copy;
+                uint8_t *tmp;
+                if (off >= info.size) return 0;
+                to_copy = ((uint32_t)edx < (info.size - off)) ? (uint32_t)edx : (info.size - off);
+                tmp = (uint8_t*)kmalloc(info.size ? info.size : 1);
+                if (!tmp) return (uint32_t)(-K_ENOMEM);
+                {
+                    ssize_t n = vfs_read(g_root_fs_for_syscalls, path, tmp, info.size);
+                    if (n < 0) {
+                        kfree(tmp);
+                        return (uint32_t)(-K_EIO);
+                    }
+                }
+                memcpy((void*)ecx, tmp + off, to_copy);
+                kfree(tmp);
+                fds[ebx].offset = off + to_copy;
+                return to_copy;
+            }
             {
                 ssize_t n = vfs_read(g_root_fs_for_syscalls, path, (void*)ecx, edx);
+                if (n == 0 && (fds[ebx].open_flags & O_NONBLOCK) &&
+                    (vfs_get_info(g_root_fs_for_syscalls, path, &info) == 0) &&
+                    (info.type == VFS_NODE_FIFO || info.type == VFS_NODE_SOCKET)) {
+                    return (uint32_t)(-K_EAGAIN);
+                }
                 if (n < 0) return (uint32_t)(-K_EIO);
                 return (uint32_t)n;
             }
         }
         case SYS_WRITE: {
+            fd_entry_t *fds = fd_current();
             const char *path;
+            vfs_info_t info;
             if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
             if (!ecx || edx == 0) return 0;
             path = fd_path(ebx);
             if (!path) return (uint32_t)(-K_EBADF);
+            if (vfs_get_info(g_root_fs_for_syscalls, path, &info) == 0 && info.type == VFS_NODE_FILE) {
+                uint32_t off = fds[ebx].offset;
+                uint32_t in_size = (uint32_t)edx;
+                uint32_t dst_size;
+                uint8_t *buf;
+                if (fds[ebx].open_flags & O_APPEND) off = info.size;
+                dst_size = (off + in_size > info.size) ? (off + in_size) : info.size;
+                buf = (uint8_t*)kmalloc(dst_size ? dst_size : 1);
+                if (!buf) return (uint32_t)(-K_ENOMEM);
+                memset(buf, 0, dst_size);
+                if (info.size > 0) {
+                    ssize_t rn = vfs_read(g_root_fs_for_syscalls, path, buf, info.size);
+                    if (rn < 0) {
+                        kfree(buf);
+                        return (uint32_t)(-K_EIO);
+                    }
+                }
+                memcpy(buf + off, (const void*)ecx, in_size);
+                if (vfs_write(g_root_fs_for_syscalls, path, buf, dst_size) < 0) {
+                    kfree(buf);
+                    return (uint32_t)(-K_EIO);
+                }
+                kfree(buf);
+                fds[ebx].offset = off + in_size;
+                return in_size;
+            }
             {
                 ssize_t n = vfs_write(g_root_fs_for_syscalls, path, (const void*)ecx, edx);
                 if (n < 0) return (uint32_t)(-K_EIO);
@@ -710,21 +1137,29 @@ uint32_t do_syscall_impl(
         }
         case SYS_EXEC: {
             char path[256];
+            char stack_cmdline[512];
             uint32_t entry = 0;
             uint32_t user_esp = USER_STACK_TOP;
 
             if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
             if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
             if (ensure_current_task_user_space() != 0) return (uint32_t)(-K_ENOMEM);
-            if (elf_load_from_vfs(g_root_fs_for_syscalls, path, &entry) != 0) return (uint32_t)(-K_ENOENT);
-            if (build_user_stack_from_cmdline(NULL, &user_esp) != 0) return (uint32_t)(-K_EINVAL);
+            if (resolve_exec_entry(path, NULL, &entry, stack_cmdline, sizeof(stack_cmdline)) != 0) return (uint32_t)(-K_ENOENT);
+            if (build_user_stack_from_cmdline(stack_cmdline[0] ? stack_cmdline : NULL, &user_esp) != 0) return (uint32_t)(-K_EINVAL);
+            if (current_task) {
+                strncpy(current_task->prog_path, path, sizeof(current_task->prog_path) - 1);
+                current_task->prog_path[sizeof(current_task->prog_path) - 1] = '\0';
+                current_task->cmdline[0] = '\0';
+            }
 
             if (f && ((f->cs & 3u) == 0u)) {
+                close_cloexec_fds();
                 sti();
-                jump_to_user_image_compat(entry, user_esp);
+                jump_to_ring3(entry, user_esp, 0x202u);
                 __builtin_unreachable();
             }
             if (!f) return (uint32_t)(-K_EINVAL);
+            close_cloexec_fds();
             f->ip = entry;
             f->sp = user_esp;
             return 0;
@@ -732,6 +1167,7 @@ uint32_t do_syscall_impl(
         case SYS_EXECV: {
             char path[256];
             char cmdline[512];
+            char stack_cmdline[512];
             uint32_t entry = 0;
             uint32_t user_esp = USER_STACK_TOP;
 
@@ -739,15 +1175,23 @@ uint32_t do_syscall_impl(
             if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
             if (copy_user_string((const char*)ecx, cmdline, sizeof(cmdline)) != 0) return (uint32_t)(-K_EINVAL);
             if (ensure_current_task_user_space() != 0) return (uint32_t)(-K_ENOMEM);
-            if (elf_load_from_vfs(g_root_fs_for_syscalls, path, &entry) != 0) return (uint32_t)(-K_ENOENT);
-            if (build_user_stack_from_cmdline(cmdline, &user_esp) != 0) return (uint32_t)(-K_EINVAL);
+            if (resolve_exec_entry(path, cmdline, &entry, stack_cmdline, sizeof(stack_cmdline)) != 0) return (uint32_t)(-K_ENOENT);
+            if (build_user_stack_from_cmdline(stack_cmdline[0] ? stack_cmdline : NULL, &user_esp) != 0) return (uint32_t)(-K_EINVAL);
+            if (current_task) {
+                strncpy(current_task->prog_path, path, sizeof(current_task->prog_path) - 1);
+                current_task->prog_path[sizeof(current_task->prog_path) - 1] = '\0';
+                strncpy(current_task->cmdline, stack_cmdline, sizeof(current_task->cmdline) - 1);
+                current_task->cmdline[sizeof(current_task->cmdline) - 1] = '\0';
+            }
 
             if (f && ((f->cs & 3u) == 0u)) {
+                close_cloexec_fds();
                 sti();
-                jump_to_user_image_compat(entry, user_esp);
+                jump_to_ring3(entry, user_esp, 0x202u);
                 __builtin_unreachable();
             }
             if (!f) return (uint32_t)(-K_EINVAL);
+            close_cloexec_fds();
             f->ip = entry;
             f->sp = user_esp;
             return 0;
@@ -766,14 +1210,14 @@ uint32_t do_syscall_impl(
             if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
             inode_fd = vfs_open(g_root_fs_for_syscalls, path);
             if (inode_fd < 0) {
-                if (ecx & 1U) {
+                if ((ecx & O_CREAT) || (ecx & 1U)) {
                     if (vfs_create_file(g_root_fs_for_syscalls, path) != 0) return (uint32_t)(-K_EACCES);
                     inode_fd = vfs_open(g_root_fs_for_syscalls, path);
                 }
                 if (inode_fd < 0) return (uint32_t)(-K_ENOENT);
             }
             {
-                int fd = fd_alloc(path);
+                int fd = fd_alloc(path, ecx);
                 if (fd < 0) return (uint32_t)(-K_ENFILE);
                 return (uint32_t)fd;
             }
@@ -784,9 +1228,18 @@ uint32_t do_syscall_impl(
             if (fds[ebx].kind == FD_KIND_UDP && fds[ebx].sock_id >= 0) {
                 udp_socket_free((int)fds[ebx].sock_id);
             }
+            if (fds[ebx].kind == FD_KIND_VFS &&
+                fds[ebx].pipe_auto_unlink &&
+                !fd_has_path_ref(fds[ebx].path, (int)ebx)) {
+                (void)vfs_unlink(g_root_fs_for_syscalls, fds[ebx].path);
+            }
             fds[ebx].used = 0;
             fds[ebx].kind = FD_KIND_VFS;
+            fds[ebx].pipe_auto_unlink = 0;
             fds[ebx].sock_id = -1;
+            fds[ebx].fd_flags = 0;
+            fds[ebx].open_flags = 0;
+            fds[ebx].offset = 0;
             fds[ebx].path[0] = '\0';
             return 0;
         }
@@ -831,6 +1284,7 @@ uint32_t do_syscall_impl(
             return (uint32_t)n;
         }
         case SYS_APPEND: {
+            fd_entry_t *fds = fd_current();
             const char *path;
             if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
             if (!ecx || edx == 0) return 0;
@@ -839,6 +1293,12 @@ uint32_t do_syscall_impl(
             {
                 ssize_t n = vfs_append(g_root_fs_for_syscalls, path, (const void*)ecx, edx);
                 if (n < 0) return (uint32_t)(-K_EIO);
+                if (n > 0) {
+                    vfs_info_t info;
+                    if (vfs_get_info(g_root_fs_for_syscalls, path, &info) == 0) {
+                        fds[ebx].offset = info.size;
+                    }
+                }
                 return (uint32_t)n;
             }
         }
@@ -870,13 +1330,298 @@ uint32_t do_syscall_impl(
         }
         case SYS_TASK_STATE:
             return (uint32_t)task_state_by_pid(ebx);
-        case SYS_TASK_KILL:
-            return (uint32_t)((task_terminate_by_pid(ebx, -1, 2u) == 0) ? 0 : -1);
+        case SYS_TASK_KILL: {
+            uint32_t sig = ecx;
+            if (sig == 0) sig = 15u;
+            if (sig != 2u && sig != 9u && sig != 15u) return (uint32_t)(-K_EINVAL);
+            return (uint32_t)((task_terminate_by_pid(ebx, (int32_t)(128u + sig), sig) == 0) ? 0 : -1);
+        }
+        case SYS_DUP:
+            return (uint32_t)fd_dup_from_to(ebx, 0, 0);
+        case SYS_DUP2:
+            return (uint32_t)fd_dup_from_to(ebx, ecx, 1);
+        case SYS_GETPID:
+            return (uint32_t)(current_task ? current_task->pid : 0);
+        case SYS_GETPPID:
+            return (uint32_t)(current_task ? current_task->ppid : 0);
+        case SYS_STAT: {
+            char path[256];
+            vfs_info_t info;
+            syscall_stat_t st;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (!ecx) return (uint32_t)(-K_EINVAL);
+            if (copy_user_path((const char*)ebx, path, sizeof(path)) != 0) return (uint32_t)(-K_EINVAL);
+            if (vfs_get_info(g_root_fs_for_syscalls, path, &info) != 0) return (uint32_t)(-K_ENOENT);
+            st.st_mode = vfs_mode_from_info(&info);
+            st.st_size = (int32_t)info.size;
+            memcpy((void*)ecx, &st, sizeof(st));
+            return 0;
+        }
+        case SYS_FSTAT: {
+            const char *path;
+            vfs_info_t info;
+            syscall_stat_t st;
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (!ecx) return (uint32_t)(-K_EINVAL);
+            path = fd_path(ebx);
+            if (!path) return (uint32_t)(-K_EBADF);
+            if (vfs_get_info(g_root_fs_for_syscalls, path, &info) != 0) return (uint32_t)(-K_EIO);
+            st.st_mode = vfs_mode_from_info(&info);
+            st.st_size = (int32_t)info.size;
+            memcpy((void*)ecx, &st, sizeof(st));
+            return 0;
+        }
+        case SYS_LSEEK: {
+            fd_entry_t *fds = fd_current();
+            const char *path;
+            vfs_info_t info;
+            int32_t cur;
+            int32_t off = (int32_t)ecx;
+            int32_t np = 0;
+            path = fd_path(ebx);
+            if (!path) return (uint32_t)(-K_EBADF);
+            if (vfs_get_info(g_root_fs_for_syscalls, path, &info) != 0) return (uint32_t)(-K_EIO);
+            if (info.type != VFS_NODE_FILE) return (uint32_t)(-K_ENOTSUP);
+            cur = (int32_t)fds[ebx].offset;
+            if ((int32_t)edx == SEEK_SET) np = off;
+            else if ((int32_t)edx == SEEK_CUR) np = cur + off;
+            else if ((int32_t)edx == SEEK_END) np = (int32_t)info.size + off;
+            else return (uint32_t)(-K_EINVAL);
+            if (np < 0) return (uint32_t)(-K_EINVAL);
+            fds[ebx].offset = (uint32_t)np;
+            return (uint32_t)np;
+        }
+        case SYS_PIPE: {
+            char path[256];
+            int fdr = -1;
+            int fdw = -1;
+            int32_t *fds_out = (int32_t*)ebx;
+            fd_entry_t *fds = fd_current();
+            if (!g_root_fs_for_syscalls) return (uint32_t)(-K_ENODEV);
+            if (!fds_out) return (uint32_t)(-K_EINVAL);
+            for (uint32_t tries = 0; tries < 32; tries++) {
+                uint32_t pid = current_task ? current_task->pid : 0;
+                uint32_t seq = g_pipe_seq++;
+                if (seq == 0) seq = g_pipe_seq++;
+                path[0] = '\0';
+                strcpy(path, "/tmp/.pipe_");
+                {
+                    char nbuf[16];
+                    utoa(pid, nbuf, 10);
+                    strcat(path, nbuf);
+                    strcat(path, "_");
+                    utoa(seq, nbuf, 10);
+                    strcat(path, nbuf);
+                }
+                if (vfs_mkfifo(g_root_fs_for_syscalls, path) == 0) {
+                    fdr = fd_alloc(path, 0);
+                    if (fdr < 0) {
+                        (void)vfs_unlink(g_root_fs_for_syscalls, path);
+                        return (uint32_t)(-K_ENFILE);
+                    }
+                    fdw = fd_alloc(path, 0);
+                    if (fdw < 0) {
+                        fd_entry_t *t = fd_current();
+                        t[fdr].used = 0;
+                        t[fdr].kind = FD_KIND_VFS;
+                        t[fdr].pipe_auto_unlink = 0;
+                        t[fdr].sock_id = -1;
+                        t[fdr].fd_flags = 0;
+                        t[fdr].open_flags = 0;
+                        t[fdr].offset = 0;
+                        t[fdr].path[0] = '\0';
+                        (void)vfs_unlink(g_root_fs_for_syscalls, path);
+                        return (uint32_t)(-K_ENFILE);
+                    }
+                    fds[fdr].pipe_auto_unlink = 1;
+                    fds[fdw].pipe_auto_unlink = 1;
+                    fds_out[0] = fdr;
+                    fds_out[1] = fdw;
+                    return 0;
+                }
+            }
+            return (uint32_t)(-K_EBUSY);
+        }
+        case SYS_FCNTL: {
+            fd_entry_t *fds = fd_current();
+            if (ebx >= FD_MAX || !fds[ebx].used) return (uint32_t)(-K_EBADF);
+            if ((int32_t)ecx == F_GETFL) return fds[ebx].open_flags;
+            if ((int32_t)ecx == F_SETFL) {
+                uint32_t keep = fds[ebx].open_flags & ~(O_APPEND | O_NONBLOCK);
+                uint32_t setv = edx & (O_APPEND | O_NONBLOCK);
+                fds[ebx].open_flags = keep | setv;
+                return 0;
+            }
+            if ((int32_t)ecx == F_GETFD) return (fds[ebx].fd_flags & FD_CLOEXEC) ? FD_CLOEXEC : 0;
+            if ((int32_t)ecx == F_SETFD) {
+                fds[ebx].fd_flags = (edx & FD_CLOEXEC) ? FD_CLOEXEC : 0;
+                return 0;
+            }
+            if ((int32_t)ecx == F_DUPFD) {
+                uint32_t minfd = edx;
+                for (uint32_t i = (minfd < 3u ? 3u : minfd); i < FD_MAX; i++) {
+                    if (!fds[i].used) {
+                        int r = fd_dup_from_to(ebx, i, 1);
+                        return (r < 0) ? (uint32_t)r : (uint32_t)r;
+                    }
+                }
+                return (uint32_t)(-K_ENFILE);
+            }
+            return (uint32_t)(-K_EINVAL);
+        }
+        case SYS_FORK: {
+            fork_child_ctx_t *ctx;
+            uint32_t child_slot = 0;
+            uint32_t child_phys = 0;
+            uint32_t child_cr3 = 0;
+            uint32_t ret_esp = 0;
+            int pid;
+            task_t *child_task;
+            int pslot;
+            int cslot;
+
+            if (!current_task || !f || !regs) return (uint32_t)(-K_EINVAL);
+            if (current_task->user_slot == (uint32_t)-1 || current_task->user_phys_base == 0) {
+                return (uint32_t)(-K_ENOSYS);
+            }
+
+            if (mm_user_slot_alloc(&child_slot, &child_phys) != 0) return (uint32_t)(-K_ENOMEM);
+            memcpy((void*)(uintptr_t)child_phys, (const void*)(uintptr_t)current_task->user_phys_base, USER_SLOT_SIZE_PHYS);
+            child_cr3 = mm_user_cr3_create(child_phys);
+            if (!child_cr3) {
+                mm_user_slot_free(child_slot);
+                return (uint32_t)(-K_ENOMEM);
+            }
+
+            ctx = (fork_child_ctx_t*)kmalloc(sizeof(*ctx));
+            if (!ctx) {
+                mm_user_cr3_destroy(child_cr3);
+                mm_user_slot_free(child_slot);
+                return (uint32_t)(-K_ENOMEM);
+            }
+            memset(ctx, 0, sizeof(*ctx));
+            ret_esp = ((f->cs & 3u) == 0u) ? ((uint32_t)(uintptr_t)f + 12u) : f->sp;
+            ctx->user_eip = f->ip;
+            ctx->user_esp = ret_esp;
+            ctx->user_eflags = f->flags;
+            ctx->user_cr3 = child_cr3;
+            ctx->user_slot = child_slot;
+            ctx->user_phys = child_phys;
+            ctx->ebx = regs->ebx;
+            ctx->ecx = regs->ecx;
+            ctx->edx = regs->edx;
+            ctx->esi = regs->esi;
+            ctx->edi = regs->edi;
+            ctx->ebp = regs->ebp;
+            strncpy(ctx->tty_path, current_task->tty_path, sizeof(ctx->tty_path) - 1);
+            strncpy(ctx->prog_path, current_task->prog_path, sizeof(ctx->prog_path) - 1);
+            strncpy(ctx->cmdline, current_task->cmdline, sizeof(ctx->cmdline) - 1);
+
+            pid = task_create(spawned_fork_child, ctx);
+            if (pid < 0) {
+                kfree(ctx);
+                mm_user_cr3_destroy(child_cr3);
+                mm_user_slot_free(child_slot);
+                return (uint32_t)(-K_ENFILE);
+            }
+
+            child_task = task_find_by_pid((uint32_t)pid);
+            if (!child_task) return (uint32_t)(-K_EIO);
+            child_task->cr3 = child_cr3;
+            child_task->user_slot = child_slot;
+            child_task->user_phys_base = child_phys;
+            strncpy(child_task->tty_path, current_task->tty_path, sizeof(child_task->tty_path) - 1);
+            child_task->tty_path[sizeof(child_task->tty_path) - 1] = '\0';
+            strncpy(child_task->prog_path, current_task->prog_path, sizeof(child_task->prog_path) - 1);
+            child_task->prog_path[sizeof(child_task->prog_path) - 1] = '\0';
+            strncpy(child_task->cmdline, current_task->cmdline, sizeof(child_task->cmdline) - 1);
+            child_task->cmdline[sizeof(child_task->cmdline) - 1] = '\0';
+
+            pslot = current_task_slot();
+            cslot = (int)(child_task - tasks);
+            if (cslot >= 0 && cslot < MAX_TASKS) {
+                if (pslot >= 0 && pslot < MAX_TASKS && g_task_fd_init[pslot]) {
+                    memcpy(g_task_fds[cslot], g_task_fds[pslot], sizeof(g_task_fds[cslot]));
+                    g_task_fd_init[cslot] = 1;
+                } else if (g_fd_init_done) {
+                    memcpy(g_task_fds[cslot], g_fds, sizeof(g_task_fds[cslot]));
+                    g_task_fd_init[cslot] = 1;
+                } else {
+                    g_task_fd_init[cslot] = 0;
+                }
+            }
+
+            return (uint32_t)pid;
+        }
+        case SYS_POLL: {
+            syscall_pollfd_t *pfds = (syscall_pollfd_t*)ebx;
+            uint32_t nfds = ecx;
+            int32_t timeout_ms = (int32_t)edx;
+            uint32_t waited = 0;
+            if (!pfds && nfds > 0) return (uint32_t)(-K_EINVAL);
+            while (1) {
+                int32_t ready = 0;
+                for (uint32_t i = 0; i < nfds; i++) {
+                    int16_t rev = fd_poll_revents(pfds[i].fd, pfds[i].events);
+                    pfds[i].revents = rev;
+                    if (rev) ready++;
+                }
+                if (ready > 0) return (uint32_t)ready;
+                if (timeout_ms == 0) return 0;
+                if (timeout_ms > 0 && (int32_t)waited >= timeout_ms) return 0;
+                sleep(10);
+                waited += 10;
+            }
+        }
+        case SYS_SELECT: {
+            syscall_select_req_t req;
+            uint32_t *rfds;
+            uint32_t *wfds;
+            uint32_t *efds;
+            uint32_t waited = 0;
+            int32_t timeout_ms;
+            if (!ebx) return (uint32_t)(-K_EINVAL);
+            memcpy(&req, (const void*)ebx, sizeof(req));
+            if (req.nfds < 0 || req.nfds > (int32_t)FD_MAX) return (uint32_t)(-K_EINVAL);
+            rfds = req.readfds;
+            wfds = req.writefds;
+            efds = req.exceptfds;
+            timeout_ms = req.timeout_ms;
+            while (1) {
+                uint32_t rmask = 0;
+                uint32_t wmask = 0;
+                uint32_t emask = 0;
+                int32_t ready = 0;
+                for (int32_t fd = 0; fd < req.nfds; fd++) {
+                    uint32_t bit = (1u << fd);
+                    int16_t events = 0;
+                    int16_t rev;
+                    int fd_ready = 0;
+                    if (rfds && (*rfds & bit)) events |= POLLIN;
+                    if (wfds && (*wfds & bit)) events |= POLLOUT;
+                    if (efds && (*efds & bit)) events |= POLLERR;
+                    if (!events) continue;
+                    rev = fd_poll_revents(fd, events);
+                    if ((rev & POLLIN) && rfds) { rmask |= bit; fd_ready = 1; }
+                    if ((rev & POLLOUT) && wfds) { wmask |= bit; fd_ready = 1; }
+                    if ((rev & (POLLERR | POLLHUP | POLLNVAL)) && efds) { emask |= bit; fd_ready = 1; }
+                    if (fd_ready) ready++;
+                }
+                if (rfds) *rfds = rmask;
+                if (wfds) *wfds = wmask;
+                if (efds) *efds = emask;
+                if (ready > 0) return (uint32_t)ready;
+                if (timeout_ms == 0) return 0;
+                if (timeout_ms > 0 && (int32_t)waited >= timeout_ms) return 0;
+                sleep(10);
+                waited += 10;
+            }
+        }
         case SYS_WAITPID: {
             int32_t status = 0;
             int32_t r = task_waitpid((int32_t)ebx, ecx ? &status : NULL, edx);
             if (r < 0) return (uint32_t)(-K_ECHILD);
-            if (ecx && (!f || ((f->cs & 3u) != 0u))) *(int32_t*)ecx = status;
+            if (ecx) *(int32_t*)ecx = status;
             return (uint32_t)r;
         }
         case SYS_INIT_SPAWN_SHELLS: {
@@ -1020,5 +1765,3 @@ uint32_t do_syscall_impl(
             return (uint32_t)(-K_ENOSYS);
     }
 }
-
-

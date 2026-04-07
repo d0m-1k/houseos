@@ -148,3 +148,7 @@ uint32_t bootloader_get_root_disk(void) {
 uint32_t bootloader_get_flags(void) {
     return g_cfg.flags;
 }
+
+uint32_t bootloader_get_video_output(void) {
+    return (uint32_t)g_cfg.video_output;
+}

@@ -178,7 +178,7 @@ ifeq ($(strip $(CMD_APPLETS)),)
 $(error No applets selected. Enable at least one APPLET_* option in .config/menuconfig)
 endif
 
-.PHONY: all clean run debug config defconfig oldconfig olddefconfig menuconfig savedefconfig printconfig syncconfig auto-files
+.PHONY: all clean run debug config defconfig oldconfig olddefconfig menuconfig savedefconfig printconfig syncconfig auto-files FORCE
 
 all: $(SYSTEM_IMG)
 
@@ -315,7 +315,7 @@ $(BUILD_DIR)/bootloader: | $(BUILD_DIR)
 	@cp bootloader/build/st2.bin $(BUILD_DIR)/st2.bin
 	@touch $@
 
-$(BUILD_DIR)/programs: | $(BUILD_DIR)
+$(BUILD_DIR)/programs: FORCE | $(BUILD_DIR)
 	@echo "MAKE  programs"
 	@$(MAKE) -C programs
 	@mkdir -p initramfs/data/bin
