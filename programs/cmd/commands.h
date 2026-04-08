@@ -31,3 +31,5 @@ int cmd_udp(int argc, char **argv, int arg0, const char *cwd);
 int cmd_bootloader(int argc, char **argv, int arg0, const char *cwd);
 int cmd_vesa(int argc, char **argv, int arg0, const char *cwd);
 int cmd_vga(int argc, char **argv, int arg0, const char *cwd);
+int cmd_clear(int argc, char **argv, int arg0, const char *cwd);
+int cmd_img_view(int argc, char **argv, int arg0, const char *cwd);

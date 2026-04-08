@@ -10,6 +10,12 @@ static int g_fd = -1;
 static int g_size = 0;
 static int g_bpp_bytes = 0;
 
+static int open_fb_device(void) {
+    int fd = open("/dev/vesa", 0);
+    if (fd >= 0) return fd;
+    return open("/dev/framebuffer/buffer", 0);
+}
+
 static int root_event(hq_widget_t *self, const hq_event_t *ev) {
     int i;
     (void)self;
@@ -29,7 +35,7 @@ static int root_event(hq_widget_t *self, const hq_event_t *ev) {
 int main(void) {
     dev_fb_info_t info;
     hq_event_t paint_ev;
-    g_fd = open("/dev/framebuffer/buffer", 0);
+    g_fd = open_fb_device();
     if (g_fd < 0) return 1;
     if (ioctl(g_fd, DEV_IOCTL_VESA_GET_INFO, &info) != 0) return 1;
 

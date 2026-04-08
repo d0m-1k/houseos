@@ -108,7 +108,9 @@ CMD_APPLETS = \
 	$(if $(filter y,$(CONFIG_APPLET_UDP)),udp) \
 	$(if $(filter y,$(CONFIG_APPLET_BOOTLOADER)),bootloader) \
 	$(if $(filter y,$(CONFIG_APPLET_VESA)),vesa) \
-	$(if $(filter y,$(CONFIG_APPLET_VGA)),vga)
+	$(if $(filter y,$(CONFIG_APPLET_VGA)),vga) \
+	clear \
+	img_view
 
 IMG_SECTORS ?= 131072
 BOOT_FLAGS_EXTRA ?= 0x0

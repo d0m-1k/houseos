@@ -44,6 +44,8 @@ static const cmd_entry_t g_cmds[] = {
     { "bootloader", cmd_bootloader },
     { "vesa", cmd_vesa },
     { "vga", cmd_vga },
+    { "clear", cmd_clear },
+    { "img_view", cmd_img_view },
 };
 
 static const char *cmd_basename(const char *path) {
