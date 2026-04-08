@@ -142,8 +142,10 @@ int elf_load_from_vfs_ex(vfs_t *fs, const char *path, uint32_t *entry_out, char 
             return -1;
         }
 
-        memset((void*)(uintptr_t)ph[i].p_vaddr, 0, ph[i].p_memsz);
         memcpy((void*)(uintptr_t)ph[i].p_vaddr, file + ph[i].p_offset, ph[i].p_filesz);
+        if (ph[i].p_memsz > ph[i].p_filesz) {
+            memset((void*)(uintptr_t)(ph[i].p_vaddr + ph[i].p_filesz), 0, ph[i].p_memsz - ph[i].p_filesz);
+        }
     }
 
     if (!range_ok(eh->e_entry, 1)) {
